@@ -107,9 +107,9 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
 
 int main() {
     int width, height, channels;
-    unsigned char *img = stbi_load("../src/lena.png", &width, &height, &channels, 1);
+    unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.png", &width, &height, &channels, 1);
     if (!img) {
-        cout << "Failed to load image!" << endl;
+        cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
     }
 
