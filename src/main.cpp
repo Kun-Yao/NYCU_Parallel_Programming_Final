@@ -30,6 +30,16 @@ double chrominance_quantization_table[8][8] = {
     {51, 60, 70, 70, 78, 95, 91, 94}
 };
 
+vector<vector<int>> zigzag_order = {
+    {0, 0}, {0, 1}, {1, 0}, {2, 0}, {1, 1}, {0, 2}, {0, 3}, {1, 2},
+    {2, 1}, {3, 0}, {4, 0}, {3, 1}, {2, 2}, {1, 3}, {0, 4}, {0, 5},
+    {1, 4}, {2, 3}, {3, 2}, {4, 1}, {5, 0}, {6, 0}, {5, 1}, {4, 2},
+    {3, 3}, {2, 4}, {1, 5}, {0, 6}, {0, 7}, {1, 6}, {2, 5}, {3, 4},
+    {4, 3}, {5, 2}, {6, 1}, {7, 0}, {7, 1}, {6, 2}, {5, 3}, {4, 4},
+    {3, 5}, {2, 6}, {1, 7}, {2, 7}, {3, 6}, {4, 5}, {5, 4}, {6, 3},
+    {7, 2}, {7, 3}, {6, 4}, {5, 5}, {4, 6}, {3, 7}, {4, 7}, {5, 6},
+    {6, 5}, {7, 4}, {7, 5}, {6, 6}, {5, 7}, {6, 7}, {7, 6}, {7, 7}
+};
 // 離散餘弦轉換 (DCT)
 void DCT(double *img, double *dct_result, int N) {
     double cu, cv, sum;
@@ -98,63 +108,38 @@ void dequantization(double *block, double *dq_block, int channel) {
 
 // ZigZag 掃描
 void zigzag_scan(double *block, vector<double> &zigzag) {
-    int i = 0, j = 0;
-    bool up = true;
+    for (const auto &pos : zigzag_order) {
+        zigzag.push_back(block[pos[0] * N + pos[1]]);
+    }
+}
 
-    while (i < N && j < N) {
-        zigzag.push_back(block[i * N + j]);
-        if (up) {
-            if (i > 0 && j < N - 1) {
-                i--; j++;
-            } else if (j == N - 1) {
-                i++;
-                up = false;
-            } else {
-                j++;
-                up = false;
-            }
+void run_length_encoding(vector<double> &zigzag, vector<pair<int, double>> &rle) {
+    int count = 1;
+    for (int i = 1; i < int(zigzag.size()); i++) {
+        if (zigzag[i] == zigzag[i - 1]) {
+            count++;
         } else {
-            if (j > 0 && i < N - 1) {
-                i++; j--;
-            } else if (i == N - 1) {
-                j++;
-                up = true;
-            } else {
-                i++;
-                up = true;
-            }
+            rle.push_back({count, zigzag[i - 1]});
+            count = 1;
+        }
+    }
+    rle.push_back({count, zigzag[zigzag.size() - 1]});
+}
+
+void run_length_decoding(vector<pair<int, double>> &rle, vector<double> &zigzag) {
+    zigzag.clear();
+    for (const auto &p : rle) {
+        for (int i = 0; i < p.first; i++) {
+            zigzag.push_back(p.second);
         }
     }
 }
 
-// 逆 ZigZag 掃描
+// reverse zigzag scan corresponding to zigzag scan
 void inverse_zigzag_scan(vector<double> &zigzag, double *block) {
-    int i = 0, j = 0, k = 0;
-    bool up = true;
-
-    while (i < N && j < N) {
-        block[i * N + j] = zigzag[k++];
-        if (up) {
-            if (i > 0 && j < N - 1) {
-                i--; j++;
-            } else if (j == N - 1) {
-                i++;
-                up = false;
-            } else {
-                j++;
-                up = false;
-            }
-        } else {
-            if (j > 0 && i < N - 1) {
-                i++; j--;
-            } else if (i == N - 1) {
-                j++;
-                up = true;
-            } else {
-                i++;
-                up = true;
-            }
-        }
+    for (int i = 0; i < N * N; i++) {
+        vector<int> temp = zigzag_order[i];
+        block[temp[0] * N + temp[1]] = zigzag[i];
     }
 }
 
@@ -187,6 +172,13 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
             // ZigZag 掃描
             zigzag_scan(q_block, zigzag);
 
+            // Run-Length Encoding
+            vector<pair<int, double>> rle;
+            run_length_encoding(zigzag, rle);
+
+            // Run-Lenght Decoding
+            run_length_decoding(rle, zigzag);
+
             // 逆 ZigZag 掃描
             inverse_zigzag_scan(zigzag, dq_block);
 
@@ -216,6 +208,8 @@ int main() {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
     }
+    // cout << "Image width: " << width << ", height: " << height << endl;
+
 
     // 將圖像資料轉換為雙精度格式
     vector<double> img_data(width * height);
