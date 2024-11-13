@@ -12,7 +12,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Add source files to a variable
 set(SOURCES
-    main.cpp
+    src/main.cpp
 )
 
 # Add executable

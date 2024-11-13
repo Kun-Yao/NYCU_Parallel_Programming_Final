@@ -107,7 +107,7 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
 
 int main() {
     int width, height, channels;
-    unsigned char *img = stbi_load("lena.jpg", &width, &height, &channels, 1);
+    unsigned char *img = stbi_load("../src/lena.png", &width, &height, &channels, 1);
     if (!img) {
         cout << "Failed to load image!" << endl;
         return -1;

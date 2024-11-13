@@ -69,28 +69,28 @@ include CMakeFiles/my_program.dir/progress.make
 # Include the compile flags for this target's objects.
 include CMakeFiles/my_program.dir/flags.make
 
-CMakeFiles/my_program.dir/main.cpp.o: CMakeFiles/my_program.dir/flags.make
-CMakeFiles/my_program.dir/main.cpp.o: ../main.cpp
-CMakeFiles/my_program.dir/main.cpp.o: CMakeFiles/my_program.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/my_program.dir/main.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/my_program.dir/main.cpp.o -MF CMakeFiles/my_program.dir/main.cpp.o.d -o CMakeFiles/my_program.dir/main.cpp.o -c /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/main.cpp
+CMakeFiles/my_program.dir/src/main.cpp.o: CMakeFiles/my_program.dir/flags.make
+CMakeFiles/my_program.dir/src/main.cpp.o: ../src/main.cpp
+CMakeFiles/my_program.dir/src/main.cpp.o: CMakeFiles/my_program.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/my_program.dir/src/main.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/my_program.dir/src/main.cpp.o -MF CMakeFiles/my_program.dir/src/main.cpp.o.d -o CMakeFiles/my_program.dir/src/main.cpp.o -c /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/src/main.cpp
 
-CMakeFiles/my_program.dir/main.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/my_program.dir/main.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/main.cpp > CMakeFiles/my_program.dir/main.cpp.i
+CMakeFiles/my_program.dir/src/main.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/my_program.dir/src/main.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/src/main.cpp > CMakeFiles/my_program.dir/src/main.cpp.i
 
-CMakeFiles/my_program.dir/main.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/my_program.dir/main.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/main.cpp -o CMakeFiles/my_program.dir/main.cpp.s
+CMakeFiles/my_program.dir/src/main.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/my_program.dir/src/main.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/src/main.cpp -o CMakeFiles/my_program.dir/src/main.cpp.s
 
 # Object files for target my_program
 my_program_OBJECTS = \
-"CMakeFiles/my_program.dir/main.cpp.o"
+"CMakeFiles/my_program.dir/src/main.cpp.o"
 
 # External object files for target my_program
 my_program_EXTERNAL_OBJECTS =
 
-my_program: CMakeFiles/my_program.dir/main.cpp.o
+my_program: CMakeFiles/my_program.dir/src/main.cpp.o
 my_program: CMakeFiles/my_program.dir/build.make
 my_program: CMakeFiles/my_program.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable my_program"
