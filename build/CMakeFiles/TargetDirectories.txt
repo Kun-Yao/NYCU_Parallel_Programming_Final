@@ -1,0 +1,3 @@
+/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles/my_program.dir
+/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles/edit_cache.dir
+/home/linxu/2024Fall/Parallel_Programming/NYCU_Parallel_Programming_Final/build/CMakeFiles/rebuild_cache.dir
