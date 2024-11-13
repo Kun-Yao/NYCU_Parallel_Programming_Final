@@ -19,13 +19,24 @@ double luminance_quantization_table[8][8] = {
     {29, 37, 38, 39, 45, 40, 41, 40}
 };
 
+double chrominance_quantization_table[8][8] = {
+    {7, 7, 8, 17, 17, 40, 42, 42},
+    {7, 8, 10, 22, 21, 45, 52, 44},
+    {9, 11, 19, 26, 26, 49, 56, 47},
+    {14, 13, 26, 31, 40, 58, 60, 51},
+    {18, 25, 40, 41, 48, 69, 69, 56},
+    {24, 40, 51, 61, 60, 70, 78, 64},
+    {40, 58, 60, 55, 64, 81, 104, 84},
+    {51, 60, 70, 70, 78, 95, 91, 94}
+};
+
 // 離散餘弦轉換 (DCT)
 void DCT(double *img, double *dct_result, int N) {
     double cu, cv, sum;
     for (int u = 0; u < N; u++) {
         for (int v = 0; v < N; v++) {
-            cu = (u == 0) ? sqrt(2) / 2.0 : 1.0;
-            cv = (v == 0) ? sqrt(2) / 2.0 : 1.0;
+            if (u == 0) cu = sqrt(2) / 2.0; else cu = 1;
+            if (v == 0) cv = sqrt(2) / 2.0; else cv = 1;
             sum = 0.0;
             for (int x = 0; x < N; x++) {
                 for (int y = 0; y < N; y++) {
@@ -39,18 +50,126 @@ void DCT(double *img, double *dct_result, int N) {
     }
 }
 
+// 逆離散餘弦轉換 (IDCT)
+void IDCT(double *freq, double *idct_result, int N) {
+    double cu, cv, sum;
+    for (int x = 0; x < N; x++) {
+        for (int y = 0; y < N; y++) {
+            sum = 0.0;
+            for (int u = 0; u < N; u++) {
+                for (int v = 0; v < N; v++) {
+                    if (u == 0) cu = sqrt(2) / 2.0; else cu = 1;
+                    if (v == 0) cv = sqrt(2) / 2.0; else cv = 1;
+                    sum += cu * cv * freq[u * N + v] *
+                           cos((2 * x + 1) * u * M_PI / (2 * N)) *
+                           cos((2 * y + 1) * v * M_PI / (2 * N));
+                }
+            }
+            idct_result[x * N + y] = 0.25 * sum;
+        }
+    }
+}
+
+// 量化
+void quantization(double *block, double *q_block, int channel) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            if (channel == 0) {
+                q_block[i * N + j] = round(block[i * N + j] / luminance_quantization_table[i][j]);
+            } else {
+                q_block[i * N + j] = round(block[i * N + j] / chrominance_quantization_table[i][j]);
+            }
+        }
+    }
+}
+
+// 去量化
+void dequantization(double *block, double *dq_block, int channel) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            if (channel == 0) {
+                dq_block[i * N + j] = round(block[i * N + j] * luminance_quantization_table[i][j]);
+            } else {
+                dq_block[i * N + j] = round(block[i * N + j] * chrominance_quantization_table[i][j]);
+            }
+        }
+    }
+}
+
+// ZigZag 掃描
+void zigzag_scan(double *block, vector<double> &zigzag) {
+    int i = 0, j = 0;
+    bool up = true;
+
+    while (i < N && j < N) {
+        zigzag.push_back(block[i * N + j]);
+        if (up) {
+            if (i > 0 && j < N - 1) {
+                i--; j++;
+            } else if (j == N - 1) {
+                i++;
+                up = false;
+            } else {
+                j++;
+                up = false;
+            }
+        } else {
+            if (j > 0 && i < N - 1) {
+                i++; j--;
+            } else if (i == N - 1) {
+                j++;
+                up = true;
+            } else {
+                i++;
+                up = true;
+            }
+        }
+    }
+}
+
+// 逆 ZigZag 掃描
+void inverse_zigzag_scan(vector<double> &zigzag, double *block) {
+    int i = 0, j = 0, k = 0;
+    bool up = true;
+
+    while (i < N && j < N) {
+        block[i * N + j] = zigzag[k++];
+        if (up) {
+            if (i > 0 && j < N - 1) {
+                i--; j++;
+            } else if (j == N - 1) {
+                i++;
+                up = false;
+            } else {
+                j++;
+                up = false;
+            }
+        } else {
+            if (j > 0 && i < N - 1) {
+                i++; j--;
+            } else if (i == N - 1) {
+                j++;
+                up = true;
+            } else {
+                i++;
+                up = true;
+            }
+        }
+    }
+}
+
 // JPEG 壓縮過程
 void JPEG(double *img, double *decompressed_img, int width, int height, int channel) {
     int rows = height;
     int cols = width;
 
-    // 逐個區塊進行 JPEG 壓縮和解壓縮
     for (int i = 0; i < rows; i += N) {
         for (int j = 0; j < cols; j += N) {
             double block[N * N], dct_result[N * N], q_block[N * N];
             double dq_block[N * N], idct_result[N * N];
+            vector<double> zigzag;
 
-            // 提取 8x8 區塊
+            // 提取 8x8 塊
             for (int x = 0; x < N; x++) {
                 for (int y = 0; y < N; y++) {
                     if (i + x < rows && j + y < cols) {
@@ -63,35 +182,19 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
             DCT(block, dct_result, N);
 
             // 量化
-            for (int i = 0; i < N; i++) {
-                for (int j = 0; j < N; j++) {
-                    q_block[i * N + j] = round(dct_result[i * N + j] / luminance_quantization_table[i][j]);
-                }
-            }
+            quantization(dct_result, q_block, channel);
+
+            // ZigZag 掃描
+            zigzag_scan(q_block, zigzag);
+
+            // 逆 ZigZag 掃描
+            inverse_zigzag_scan(zigzag, dq_block);
 
             // 去量化
-            for (int i = 0; i < N; i++) {
-                for (int j = 0; j < N; j++) {
-                    dq_block[i * N + j] = round(q_block[i * N + j] * luminance_quantization_table[i][j]);
-                }
-            }
+            dequantization(dq_block, dq_block, channel);
 
             // IDCT
-            for (int x = 0; x < N; x++) {
-                for (int y = 0; y < N; y++) {
-                    double sum = 0.0;
-                    for (int u = 0; u < N; u++) {
-                        for (int v = 0; v < N; v++) {
-                            double cu = (u == 0) ? sqrt(2) / 2.0 : 1.0;
-                            double cv = (v == 0) ? sqrt(2) / 2.0 : 1.0;
-                            sum += cu * cv * dq_block[u * N + v] *
-                                   cos((2 * x + 1) * u * M_PI / (2 * N)) *
-                                   cos((2 * y + 1) * v * M_PI / (2 * N));
-                        }
-                    }
-                    idct_result[x * N + y] = 0.25 * sum;
-                }
-            }
+            IDCT(dq_block, idct_result, N);
 
             // 儲存到解壓縮影像
             for (int x = 0; x < N; x++) {
@@ -106,6 +209,7 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
 }
 
 int main() {
+    // 載入影像
     int width, height, channels;
     unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.png", &width, &height, &channels, 1);
     if (!img) {
@@ -119,7 +223,7 @@ int main() {
         img_data[i] = static_cast<double>(img[i]);
     }
 
-    // 壓縮並解壓縮圖像
+    // JPEG 壓縮
     vector<double> decompressed_img(width * height, 0.0);
     JPEG(img_data.data(), decompressed_img.data(), width, height, 0);
 
@@ -132,6 +236,10 @@ int main() {
     mse /= width * height;
     double psnr = (mse == 0) ? INFINITY : 10 * log10(255 * 255 / mse);
     cout << "PSNR: " << psnr << endl;
+
+    // 儲存解壓縮影像
+    // decompressed_img.convertTo(decompressed_img, CV_8U);
+    // imwrite("decompressed_lena.jpg", decompressed_img);
 
     stbi_image_free(img);
     return 0;
