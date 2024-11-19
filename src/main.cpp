@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include "../include/CycleTimer.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb_image.h"
 
@@ -217,9 +218,15 @@ int main() {
         img_data[i] = static_cast<double>(img[i]);
     }
 
+    // calculate start time
+    double start = CycleTimer::currentSeconds();
+
     // JPEG 壓縮
     vector<double> decompressed_img(width * height, 0.0);
     JPEG(img_data.data(), decompressed_img.data(), width, height, 0);
+
+    // calculate end time
+    double end = CycleTimer::currentSeconds();
 
     // 計算 PSNR
     double mse = 0.0;
@@ -230,6 +237,9 @@ int main() {
     mse /= width * height;
     double psnr = (mse == 0) ? INFINITY : 10 * log10(255 * 255 / mse);
     cout << "PSNR: " << psnr << endl;
+
+    // output execution time
+    std::cout << "Total execution time: " << (end - start) * 1000.0 << " ms" << std::endl;
 
     // 儲存解壓縮影像
     // decompressed_img.convertTo(decompressed_img, CV_8U);
