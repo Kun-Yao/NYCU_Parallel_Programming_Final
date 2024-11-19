@@ -1,9 +1,12 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <fstream>
 #include "../include/CycleTimer.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../include/stb_image_write.h"
 
 using namespace std;
 
@@ -201,16 +204,28 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
     }
 }
 
+int getFileSize(const string &filename) {
+    ifstream file(filename, ios::binary | ios::ate);  // 開啟檔案並定位至檔案結尾
+    if (!file) {
+        cout << "Failed to open file: " << filename << endl;
+        return -1;
+    }
+    return file.tellg();  // 返回檔案大小
+}
+
 int main() {
     // 載入影像
     int width, height, channels;
-    unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.png", &width, &height, &channels, 1);
+    unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.bmp", &width, &height, &channels, 1);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
     }
     // cout << "Image width: " << width << ", height: " << height << endl;
 
+    // 計算原始影像檔案大小
+    int original_size = getFileSize("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.bmp");
+    if (original_size == -1) return -1;
 
     // 將圖像資料轉換為雙精度格式
     vector<double> img_data(width * height);
@@ -241,9 +256,28 @@ int main() {
     // output execution time
     std::cout << "Total execution time: " << (end - start) * 1000.0 << " ms" << std::endl;
 
+    // 將解壓縮影像從雙精度轉換為 8 位無符號整數型態
+    vector<unsigned char> decompressed_img_8u(width * height);
+    for (int i = 0; i < width * height; i++) {
+        // 限制像素值範圍至 0 到 255 之間
+        decompressed_img_8u[i] = static_cast<unsigned char>(std::min(255.0, std::max(0.0, decompressed_img[i])));
+    }
+
     // 儲存解壓縮影像
-    // decompressed_img.convertTo(decompressed_img, CV_8U);
-    // imwrite("decompressed_lena.jpg", decompressed_img);
+    if (!stbi_write_jpg("decompressed_lena.jpg", width, height, 1, decompressed_img_8u.data(), 100)) {
+        cout << "Failed to save decompressed image!" << endl;
+        return -1;
+    }
+
+    // 計算壓縮後影像檔案大小
+    int compressed_size = getFileSize("decompressed_lena.jpg");
+    if (compressed_size == -1) return -1;
+
+    // 計算壓縮率
+    double compression_rate = (static_cast<double>(original_size) / static_cast<double>(compressed_size));
+    cout << "Compression Rate: " << compression_rate << "x" << endl;
+
+
 
     stbi_image_free(img);
     return 0;
