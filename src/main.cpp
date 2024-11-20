@@ -148,7 +148,7 @@ void inverse_zigzag_scan(vector<double> &zigzag, double *block) {
 }
 
 // JPEG 壓縮過程
-void JPEG(double *img, double *decompressed_img, int width, int height, int channel) {
+void JPEG(double *img, double *decompressed_img, int width, int height, int channel, int &rleSize) {
     int rows = height;
     int cols = width;
 
@@ -175,10 +175,16 @@ void JPEG(double *img, double *decompressed_img, int width, int height, int chan
 
             // ZigZag 掃描
             zigzag_scan(q_block, zigzag);
+            // rleSize += zigzag.size() * sizeof(double);
 
             // Run-Length Encoding
             vector<pair<int, double>> rle;
             run_length_encoding(zigzag, rle);
+            // cout<<rle[0].second<<" ";
+            // cout<<sizeof(pair<int, double>)<<" "; 
+
+
+            rleSize += rle.size() * 16;
 
             // Run-Lenght Decoding
             run_length_decoding(rle, zigzag);
@@ -216,7 +222,7 @@ int getFileSize(const string &filename) {
 int main() {
     // 載入影像
     int width, height, channels;
-    unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.bmp", &width, &height, &channels, 1);
+    unsigned char *img = stbi_load("/home/312553027/NYCU_Parallel_Programming_Final/src/lena_gray.bmp", &width, &height, &channels, 1);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
@@ -224,8 +230,9 @@ int main() {
     // cout << "Image width: " << width << ", height: " << height << endl;
 
     // 計算原始影像檔案大小
-    int original_size = getFileSize("/home/312553027/NYCU_Parallel_Programming_Final/src/lena.bmp");
+    int original_size = getFileSize("/home/312553027/NYCU_Parallel_Programming_Final/src/lena_gray.bmp");
     if (original_size == -1) return -1;
+    cout<<"Original Size: "<<original_size<<endl;
 
     // 將圖像資料轉換為雙精度格式
     vector<double> img_data(width * height);
@@ -236,9 +243,13 @@ int main() {
     // calculate start time
     double start = CycleTimer::currentSeconds();
 
+    int rleSize = 0;
+
     // JPEG 壓縮
     vector<double> decompressed_img(width * height, 0.0);
-    JPEG(img_data.data(), decompressed_img.data(), width, height, 0);
+    JPEG(img_data.data(), decompressed_img.data(), width, height, 0, rleSize);
+
+    cout<<"RLE Size: "<<rleSize<<endl;
 
     // calculate end time
     double end = CycleTimer::currentSeconds();
@@ -264,13 +275,17 @@ int main() {
     }
 
     // 儲存解壓縮影像
-    if (!stbi_write_jpg("decompressed_lena.jpg", width, height, 1, decompressed_img_8u.data(), 100)) {
+    // if (!stbi_write_jpg("decompressed_lena.jpg", width, height, 1, decompressed_img_8u.data(), 100)) {
+    //     cout << "Failed to save decompressed image!" << endl;
+    //     return -1;
+    // }
+    if (!stbi_write_bmp("decompressed_lena.bmp", width, height, 1, decompressed_img_8u.data())) {
         cout << "Failed to save decompressed image!" << endl;
         return -1;
     }
 
     // 計算壓縮後影像檔案大小
-    int compressed_size = getFileSize("decompressed_lena.jpg");
+    int compressed_size = getFileSize("decompressed_lena.bmp");
     if (compressed_size == -1) return -1;
 
     // 計算壓縮率
