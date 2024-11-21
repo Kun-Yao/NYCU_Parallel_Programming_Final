@@ -9,6 +9,7 @@
 #include "./include/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "./include/stb_image_write.h"
+#include <omp.h>
 
 using namespace std;
 
@@ -57,6 +58,7 @@ struct Node {
 //DCT
 vector<vector<double>> DCT(vector<vector<double>> &block) {
     vector<vector<double>> dct(N, vector<double>(N, 0));
+    #pragma omp parallel for
     for (int u = 0; u < N; u++) {
         for (int v = 0; v < N; v++) {
             double sum = 0;
@@ -81,6 +83,7 @@ vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
     } else {
         quantization_table = chrominance_quantization_table;
     }
+    #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
@@ -91,6 +94,7 @@ vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
 //zigzag
 vector<int> ZigZag(vector<vector<int>> &quantization) {
     vector<int> zigzag(N * N, 0);
+    #pragma omp parallel for
     for (int i = 0; i < N * N; i++) {
         zigzag[i] = quantization[table[i].first][table[i].second];
     }
@@ -219,6 +223,7 @@ vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
 //inverse zigzag
 vector<vector<int>> InverseZigZag(vector<int> &zigzag) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
+    #pragma omp parallel for
     for (int i = 0; i < N * N; i++) {
         quantization[table[i].first][table[i].second] = zigzag[i];
     }
@@ -233,6 +238,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
     } else {
         quantization_table = chrominance_quantization_table;
     }
+    #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             dct[i][j] = quantization[i][j] * quantization_table[i][j];
@@ -243,6 +249,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
 //inverse DCT
 vector<vector<double>> InverseDCT(vector<vector<double>> &dct) {
     vector<vector<double>> block(N, vector<double>(N, 0));
+    #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             double sum = 0;
@@ -273,6 +280,7 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
     // 8x8 block DCT
     int block_height = height / 8;
     int block_width = width / 8;
+    #pragma omp parallel for
     for (int i = 0; i < block_height; i++) {
         for (int j = 0; j < block_width; j++) {
             vector<vector<double>> block(N, vector<double>(N, 0));
@@ -292,6 +300,7 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
             vector<pair<int, string>> huffman_table;
             BuildHuffmanTable(root, huffman_table, "");
             vector<bool> huffman_code = HuffmanEncoding(rle, huffman_table);
+            #pragma omp atomic
             transport_size += compressed_structure.size() + compressed_values.size() * 8 + huffman_code.size();
             int index = 0, valueIndex = 0;
             Node* decompressRoot = DecompressHuffmanTree(compressed_structure, compressed_values, index, valueIndex);
@@ -315,6 +324,14 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
 }
 
 int main() {
+
+    #pragma omp parallel
+    {
+        if (omp_get_thread_num() == 0) { // 主執行緒執行一次
+            int num_threads = omp_get_num_threads();
+            std::cout << "Number of threads: " << num_threads << std::endl;
+        }
+    }
     // 載入影像
 
     int width, height, channels;
@@ -329,19 +346,41 @@ int main() {
     // rgb to yCbCr
     double start = CycleTimer::currentSeconds();
     vector<vector<vector<double>>> yCbCr(height, vector<vector<double>>(width, vector<double>(3, 0)));
+    // #pragma omp parallel for
+    // for (int i = 0; i < height; i++) {
+    //     for (int j = 0; j < width; j++) {
+    //         yCbCr[i][j][0] = 0.299 * img[i * width * 3 + j * 3] + 0.587 * img[i * width * 3 + j * 3 + 1] + 0.114 * img[i * width * 3 + j * 3 + 2];
+    //         yCbCr[i][j][1] = 128 - 0.168736 * img[i * width * 3 + j * 3] - 0.331264 * img[i * width * 3 + j * 3 + 1] + 0.5 * img[i * width * 3 + j * 3 + 2];
+    //         yCbCr[i][j][2] = 128 + 0.5 * img[i * width * 3 + j * 3] - 0.418688 * img[i * width * 3 + j * 3 + 1] - 0.081312 * img[i * width * 3 + j * 3 + 2];
+    //     }
+    // }
+    #pragma omp parallel for
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
-            yCbCr[i][j][0] = 0.299 * img[i * width * 3 + j * 3] + 0.587 * img[i * width * 3 + j * 3 + 1] + 0.114 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][1] = 128 - 0.168736 * img[i * width * 3 + j * 3] - 0.331264 * img[i * width * 3 + j * 3 + 1] + 0.5 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][2] = 128 + 0.5 * img[i * width * 3 + j * 3] - 0.418688 * img[i * width * 3 + j * 3 + 1] - 0.081312 * img[i * width * 3 + j * 3 + 2];
+            int index = i * width * 3 + j * 3; // 計算 RGB 的索引
+            float r = img[index];
+            float g = img[index + 1];
+            float b = img[index + 2];
+
+            // YCbCr color space convertion
+            yCbCr[i][j][0] = 0.299f * r + 0.587f * g + 0.114f * b;                         // Y
+            yCbCr[i][j][1] = 128.0f - 0.168736f * r - 0.331264f * g + 0.5f * b;            // Cb
+            yCbCr[i][j][2] = 128.0f + 0.5f * r - 0.418688f * g - 0.081312f * b;            // Cr
+
+            // range limited 0 - 255
+            yCbCr[i][j][0] = fmin(fmax(yCbCr[i][j][0], 0.0f), 255.0f);
+            yCbCr[i][j][1] = fmin(fmax(yCbCr[i][j][1], 0.0f), 255.0f);
+            yCbCr[i][j][2] = fmin(fmax(yCbCr[i][j][2], 0.0f), 255.0f);
         }
     }
+
     int transport_size = 0;
     vector<vector<double>> y_de = JPEGCompressAndDepression(yCbCr, 0, transport_size);
     vector<vector<double>> Cb_de = JPEGCompressAndDepression(yCbCr, 1, transport_size);
     vector<vector<double>> Cr_de = JPEGCompressAndDepression(yCbCr, 2, transport_size);
     // Convert back to RGB
     vector<vector<vector<double>>> rgb_de(height, vector<vector<double>>(width, vector<double>(3, 0)));
+    #pragma omp parallel for
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             rgb_de[i][j][0] = y_de[i][j] + 1.402 * (Cr_de[i][j] - 128);
@@ -355,6 +394,7 @@ int main() {
 
     //show image
     vector<unsigned char> img_de(width * height * 3);
+    #pragma omp parallel for
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             img_de[i * width * 3 + j * 3] = rgb_de[i][j][0];
@@ -366,6 +406,7 @@ int main() {
     cout << "Time: " << (end - start) * 1000 << "ms" << endl;
     //PSNR 3 channel
     double mse = 0;
+    #pragma omp parallel for reduction(+:mse)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             for (int k = 0; k < 3; k++) {

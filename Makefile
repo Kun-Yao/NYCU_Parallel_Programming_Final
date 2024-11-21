@@ -2,7 +2,7 @@
 CXX := g++
 
 # 設定編譯選項
-CXXFLAGS := -O3 -std=c++17 -Wall
+CXXFLAGS := -O3 -std=c++17 -Wall -fopenmp
 
 # 設定包含目錄
 INCLUDE_DIR := include
@@ -17,7 +17,7 @@ all: $(TARGET)
 
 # 編譯目標
 $(TARGET): $(OBJS)
-	$(CXX) $(OBJS) -o $(TARGET)
+	$(CXX) $(CXXFLAGS) $(OBJS) -o $(TARGET)
 
 # 編譯源碼檔案
 %.o: %.cpp
