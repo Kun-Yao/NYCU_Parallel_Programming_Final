@@ -172,7 +172,7 @@ void CompressHuffmanTree(Node *root, vector<bool> &compressed_structure, vector<
 
 // Decompress Huffman tree
 Node* DecompressHuffmanTree(const vector<bool> &compressed_structure, const vector<int> &compressed_values, int &idx_struct, int &idx_value) {
-    if (idx_struct >= compressed_structure.size()) {
+    if (static_cast<size_t>(idx_struct) >= compressed_structure.size()) {
         return nullptr;
     }
 
@@ -318,7 +318,7 @@ int main() {
     // 載入影像
 
     int width, height, channels;
-    unsigned char *img = stbi_load("lenna.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load("src/lenna.bmp", &width, &height, &channels, 3);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
