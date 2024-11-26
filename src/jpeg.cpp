@@ -10,6 +10,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "./include/stb_image_write.h"
 #include <omp.h>
+#include "./include/shishua-avx2.h"
 
 using namespace std;
 
@@ -25,8 +26,28 @@ vector<vector<int>> luminance_quantization_table = {
     {49, 64, 78, 87, 103, 121, 120, 101},
     {72, 92, 95, 98, 112, 100, 103, 99}
 };
+vector<vector<double>> luminance_quantization_table_test = {
+    {16, 11, 10, 16, 24, 40, 51, 61},
+    {12, 12, 14, 19, 26, 58, 60, 55},
+    {14, 13, 16, 24, 40, 57, 69, 56},
+    {14, 17, 22, 29, 51, 87, 80, 62},
+    {18, 22, 37, 56, 68, 109, 103, 77},
+    {24, 35, 55, 64, 81, 104, 113, 92},
+    {49, 64, 78, 87, 103, 121, 120, 101},
+    {72, 92, 95, 98, 112, 100, 103, 99}
+};
 //chrominance quantization table
 vector<vector<int>> chrominance_quantization_table = {
+    {17, 18, 24, 47, 99, 99, 99, 99},
+    {18, 21, 26, 66, 99, 99, 99, 99},
+    {24, 26, 56, 99, 99, 99, 99, 99},
+    {47, 66, 99, 99, 99, 99, 99, 99},
+    {99, 99, 99, 99, 99, 99, 99, 99},
+    {99, 99, 99, 99, 99, 99, 99, 99},
+    {99, 99, 99, 99, 99, 99, 99, 99},
+    {99, 99, 99, 99, 99, 99, 99, 99}
+};
+vector<vector<double>> chrominance_quantization_table_test = {
     {17, 18, 24, 47, 99, 99, 99, 99},
     {18, 21, 26, 66, 99, 99, 99, 99},
     {24, 26, 56, 99, 99, 99, 99, 99},
@@ -58,7 +79,7 @@ struct Node {
 //DCT
 vector<vector<double>> DCT(vector<vector<double>> &block) {
     vector<vector<double>> dct(N, vector<double>(N, 0));
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int u = 0; u < N; u++) {
         for (int v = 0; v < N; v++) {
             double sum = 0;
@@ -75,26 +96,60 @@ vector<vector<double>> DCT(vector<vector<double>> &block) {
     return dct;
 }
 //quantization
-vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
-    vector<vector<int>> quantization(N, vector<int>(N, 0));
-    vector<vector<int>> quantization_table;
+// vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
+//     vector<vector<int>> quantization(N, vector<int>(N, 0));
+//     vector<vector<int>> quantization_table;
+//     if (channel == 0) {
+//         quantization_table = luminance_quantization_table;
+//     } else {
+//         quantization_table = chrominance_quantization_table;
+//     }
+//     // #pragma omp parallel for
+//     for (int i = 0; i < N; i++) {
+//         for (int j = 0; j < N; j++) {
+//             quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
+//         }
+//     }
+//     return quantization;
+// }
+std::vector<std::vector<int>> Quantization(std::vector<std::vector<double>> &dct, int channel) {
+    // using double instead of int
+    std::vector<std::vector<double>> quantization(N, std::vector<double>(N, 0));
+    std::vector<std::vector<double>> quantization_table;
+
     if (channel == 0) {
-        quantization_table = luminance_quantization_table;
+        quantization_table = luminance_quantization_table_test;
     } else {
-        quantization_table = chrominance_quantization_table;
+        quantization_table = chrominance_quantization_table_test;
     }
-    #pragma omp parallel for
+
     for (int i = 0; i < N; i++) {
-        for (int j = 0; j < N; j++) {
-            quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
+        for (int j = 0; j < N; j += 4) {
+            __m256d dct_vals = _mm256_loadu_pd(&dct[i][j]);
+            __m256d quant_vals = _mm256_loadu_pd(&quantization_table[i][j]);
+
+            __m256d result = _mm256_div_pd(dct_vals, quant_vals);
+
+            result = _mm256_round_pd(result, _MM_FROUND_TO_NEAREST_INT);
+            _mm256_storeu_pd(&quantization[i][j], result);
         }
     }
-    return quantization;
+
+    // convert to int type
+    std::vector<std::vector<int>> final_quantization(N, std::vector<int>(N, 0));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            final_quantization[i][j] = static_cast<int>(round(quantization[i][j]));
+        }
+    }
+
+    return final_quantization;
 }
+
 //zigzag
 vector<int> ZigZag(vector<vector<int>> &quantization) {
     vector<int> zigzag(N * N, 0);
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < N * N; i++) {
         zigzag[i] = quantization[table[i].first][table[i].second];
     }
@@ -223,7 +278,7 @@ vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
 //inverse zigzag
 vector<vector<int>> InverseZigZag(vector<int> &zigzag) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < N * N; i++) {
         quantization[table[i].first][table[i].second] = zigzag[i];
     }
@@ -238,7 +293,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
     } else {
         quantization_table = chrominance_quantization_table;
     }
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             dct[i][j] = quantization[i][j] * quantization_table[i][j];
@@ -249,7 +304,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
 //inverse DCT
 vector<vector<double>> InverseDCT(vector<vector<double>> &dct) {
     vector<vector<double>> block(N, vector<double>(N, 0));
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             double sum = 0;

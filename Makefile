@@ -2,7 +2,7 @@
 CXX := g++
 
 # 設定編譯選項
-CXXFLAGS := -O3 -std=c++17 -Wall -fopenmp
+CXXFLAGS := -O3 -std=c++17 -Wall -fopenmp -mavx2
 
 # 設定包含目錄
 INCLUDE_DIR := include
