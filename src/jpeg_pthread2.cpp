@@ -14,6 +14,7 @@
 using namespace std;
 
 const int N = 8;
+const int num_thread = 6;
 //luminance quantization table
 vector<vector<int>> luminance_quantization_table = {
     {16, 11, 10, 16, 24, 40, 51, 61},
@@ -56,9 +57,10 @@ struct Node {
     Node(int value, int weight, Node *left, Node *right) : value(value), weight(weight), left(left), right(right) {}
 };
 //DCT
-vector<vector<double>> DCT(vector<vector<double>> &block) {
-    vector<vector<double>> dct(N, vector<double>(N, 0));
-    for (int u = 0; u < N; u++) {
+void* DCT(void* arg) {
+    vector2D_arg* data = (vector2D_arg*)arg;
+    vector<vector<double>> dct(data->thread_block_height, vector<double>(N, 0));
+    for (int u = data->start_block_row; u < data->end_block_row; u++) {
         for (int v = 0; v < N; v++) {
             double sum = 0;
             for (int i = 0; i < N; i++) {
@@ -68,7 +70,7 @@ vector<vector<double>> DCT(vector<vector<double>> &block) {
             }
             double Cu = (u == 0) ? 1 / sqrt(2) : 1;
             double Cv = (v == 0) ? 1 / sqrt(2) : 1;
-            dct[u][v] = 0.125 * Cu * Cv * sum;
+            dct[u][v] = 0.25 * Cu * Cv * sum;
         }
     }
     return dct;
@@ -254,7 +256,7 @@ vector<vector<double>> InverseDCT(vector<vector<double>> &dct) {
                     sum += Cu * Cv * dct[u][v] * cos((2 * i + 1) * u * M_PI / 16) * cos((2 * j + 1) * v * M_PI / 16);
                 }
             }
-            block[i][j] = 0.125 * sum;
+            block[i][j] = 0.25 * sum;
         }
     }
     return block;
@@ -267,80 +269,148 @@ void DeleteHuffmanTree(Node* root) {
     }
 }
 
-struct pthread_arg{
-    vector<vector<vector<double>>>* yCbCr;
+struct jpeg_arg{
+    int start_block_row;
+    int end_block_row;
+    int block_width;
     int channel;
     int* transport_size;
-    vector<vector<double>>* yCbCr_de;
-    int i;
-    int j;
-}
+    vector<vector<vector<double>>>* yCbCr;
+    vector<vector<double>>* channel_de;
+};
 
-void* JPEGperBlock(void* args){
-    pthread_arg* pa = static_cast<pthread_arg*>(args);
-    vector<vector<double>> block(N, vector<double>(N, 0));
-    for (int x = 0; x < N; x++) {
-        for (int y = 0; y < N; y++) {
-            block[x][y] = pa->yCbCr[pa->i * 8 + x][pa->j * 8 + y][pa->channel];
-        }
-    }
-    vector<vector<double>> dct = DCT(block);
-    vector<vector<int>> quantization = Quantization(dct, channel);
-    vector<int> zigzag = ZigZag(quantization);
-    vector<pair<int, int>> rle = RunLengthEncoding(zigzag);
-    vector<bool> compressed_structure;
-    vector<int> compressed_values;  
-    Node* root = BuildHuffmanTree(rle);
-    CompressHuffmanTree(root, compressed_structure, compressed_values);
-    vector<pair<int, string>> huffman_table;
-    BuildHuffmanTable(root, huffman_table, "");
-    vector<bool> huffman_code = HuffmanEncoding(rle, huffman_table);
-    pa->transport_size += compressed_structure.size() + compressed_values.size() * 8 + huffman_code.size();
-    int index = 0, valueIndex = 0;
-    Node* decompressRoot = DecompressHuffmanTree(compressed_structure, compressed_values, index, valueIndex);
-    //watch decompress tree
-    vector<pair<int, string>> decompressHuffmanTable;
-    BuildHuffmanTable(decompressRoot, decompressHuffmanTable, "");
-    vector<pair<int, int>> rle_de = HuffmanDecoding(huffman_code, decompressRoot);
-    DeleteHuffmanTree(root);
-    vector<int> zigzag_de = DecodeRunLengthEncoding(rle);
-    vector<vector<int>> quantization_de = InverseZigZag(zigzag_de);
-    vector<vector<double>> dct_de = InverseQuantization(quantization_de, channel);
-    vector<vector<double>> block_de = InverseDCT(dct_de);
+struct vector2D_arg{
+    int start_block_row;
+    int end_block_row;
+    int thread_block_height;
+    int channel;
+    vector<vector<double>>* block;
+};
 
-    for (int x = 0; x < N; x++) {
-        for (int y = 0; y < N; y++) {
-            yCbCr_de[pa->i * 8 + x][pa->j * 8 + y] = block_de[x][y];
-        }
-    }
-    return nullptr;
-}
-// JPEG for each color channel
 vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> &yCbCr, int channel, int& transport_size) {
     int height = yCbCr.size();
     int width = yCbCr[0].size();
     //Decompression image individual channel
-    vector<vector<double>> yCbCr_de(height, vector<double>(width, 0));
+    vector<vector<double>> channel_de(height, vector<double>(width, 0));
     // 8x8 block DCT
+    pthread_t threads[num_thread];
+    jpeg_arg jpeg_args[num_thread];
+
     int block_height = height / 8;
     int block_width = width / 8;
-    int NUM_THREADS = 6;
-    // int thread_block_height = block_height / NUM_THREADS;
-    // int extra_block_height = block_heaght % NUM_THREADS;
-    // JPEG for each block
-    pthread_t threads[NUM_THREADS];
-    pthread_arg args[NUM_THREADS];
-    for (int i = 0; i < block_height * block_width; i++) {
-        for (int j = 0; j < block_width; j++){
-            pthread_arg args[i % NUM_THREADS] = pthread_arg(yCbCr, channel, transport_size, &yCbCr_de, i, j);
-            if (pthread_create(&threads[i % NUM_THREADS], nullptr, JPEGperThread, (void*)args[i % NUM_THREADS])){
-                cerr << "Error creating thread" << i+1 << endl;
-                return 1;
+    for (int i = 0; i < block_height; i++) {
+        for (int j = 0; j < block_width; j++) {
+            vector<vector<double>> block(N, vector<double>(N, 0));
+            for (int x = 0; x < N; x++) {
+                for (int y = 0; y < N; y++) {
+                    block[x][y] = yCbCr[i * 8 + x][j * 8 + y][channel];
+                }
             }
-            
+            pthread_t threads[num_thread];
+            vector2D_arg v_args[num_thread];
+            int thread_block_height = 8 / num_thread;
+            int extra_block_height = 8 % num_thread;
+            int start = 0, end;
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                v_args[i].start_block_row = start;
+                v_args[i].end_block_row = end;
+                v_args[i].thread_block_height = end - start;
+                v_args[i].channel = channel;
+                v_args[i].block = &block;
+                if (pthread_create(&threads[i], nullptr, DCT, (void*)v_args)){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
+            vector<vector<int>> quantization = Quantization(dct, data->channel);
+            vector<int> zigzag = ZigZag(quantization);
+            vector<pair<int, int>> rle = RunLengthEncoding(zigzag);
+            vector<bool> compressed_structure;
+            vector<int> compressed_values;  
+            Node* root = BuildHuffmanTree(rle);
+            CompressHuffmanTree(root, compressed_structure, compressed_values);
+            vector<pair<int, string>> huffman_table;
+            BuildHuffmanTable(root, huffman_table, "");
+            vector<bool> huffman_code = HuffmanEncoding(rle, huffman_table);
+            transport_size += compressed_structure.size() + compressed_values.size() * 8 + huffman_code.size();
+            int index = 0, valueIndex = 0;
+            Node* decompressRoot = DecompressHuffmanTree(compressed_structure, compressed_values, index, valueIndex);
+            //watch decompress tree
+            vector<pair<int, string>> decompressHuffmanTable;
+            BuildHuffmanTable(decompressRoot, decompressHuffmanTable, "");
+            vector<pair<int, int>> rle_de = HuffmanDecoding(huffman_code, decompressRoot);
+            DeleteHuffmanTree(root);
+            vector<int> zigzag_de = DecodeRunLengthEncoding(rle);
+            vector<vector<int>> quantization_de = InverseZigZag(zigzag_de);
+            vector<vector<double>> dct_de = InverseQuantization(quantization_de, data->channel);
+            vector<vector<double>> block_de = InverseDCT(dct_de);
+            for (int x = 0; x < N; x++) {
+                for (int y = 0; y < N; y++) {
+                    channel_de[i * 8 + x][j * 8 + y] = block_de[x][y];
+                }
+            }
         }
     }
-    return yCbCr_de;
+
+    return channel_de;
+}
+
+struct yCbCr_arg{
+    int start_row;
+    int end_row;
+    int width;
+    unsigned char *img;
+    vector<vector<vector<double>>>* yCbCr;
+};
+
+void* convert_to_yCbCr(void* arg) {
+    yCbCr_arg *data = (yCbCr_arg *)arg;
+    for (int i = data->start_row; i < data->end_row; i++) {
+        for (int j = 0; j < data->width; j++) {
+            (*data->yCbCr)[i][j][0] = 0.299 * data->img[i * data->width * 3 + j * 3] +
+                                   0.587 * data->img[i * data->width * 3 + j * 3 + 1] +
+                                   0.114 * data->img[i * data->width * 3 + j * 3 + 2];
+            (*data->yCbCr)[i][j][1] = 128 - 0.168736 * data->img[i * data->width * 3 + j * 3] -
+                                   0.331264 * data->img[i * data->width * 3 + j * 3 + 1] +
+                                   0.5 * data->img[i * data->width * 3 + j * 3 + 2];
+            (*data->yCbCr)[i][j][2] = 128 + 0.5 * data->img[i * data->width * 3 + j * 3] -
+                                   0.418688 * data->img[i * data->width * 3 + j * 3 + 1] -
+                                   0.081312 * data->img[i * data->width * 3 + j * 3 + 2];
+        }
+    }
+    return nullptr;
+}
+
+struct rgb_arg{
+    int start_row;
+    int end_row;
+    int width;
+    vector<vector<double>>* y_de;
+    vector<vector<double>>* cb_de;
+    vector<vector<double>>* cr_de;
+    vector<vector<vector<double>>>* RGB_de;
+};
+void* convert_to_rgb(void* arg) {
+    rgb_arg *data = (rgb_arg *)arg;
+    for (int i = data->start_row; i < data->end_row; i++) {
+        for (int j = 0; j < data->width; j++) {
+            (*data->RGB_de)[i][j][0] = (*data->y_de)[i][j] + 1.402 * ((*data->cr_de)[i][j] - 128);
+            (*data->RGB_de)[i][j][1] = (*data->y_de)[i][j] - 0.344136 * ((*data->cb_de)[i][j] - 128) - 0.714136 * ((*data->cr_de)[i][j] - 128);
+            (*data->RGB_de)[i][j][2] = (*data->y_de)[i][j] + 1.772 * ((*data->cb_de)[i][j] - 128);
+            for (int k = 0; k < 3; k++) {
+                (*data->RGB_de)[i][j][k] = ((*data->RGB_de)[i][j][k] > 255) ? 255 : ((*data->RGB_de)[i][j][k] < 0) ? 0 : (*data->RGB_de)[i][j][k];
+            }
+        }
+    }
+    return nullptr;
 }
 
 int main() {
@@ -356,30 +426,65 @@ int main() {
 
     //jpeg compression
     // rgb to yCbCr
-    double start = CycleTimer::currentSeconds();
+    double start_time = CycleTimer::currentSeconds();
     vector<vector<vector<double>>> yCbCr(height, vector<vector<double>>(width, vector<double>(3, 0)));
-    for (int i = 0; i < height; i++) {
-        for (int j = 0; j < width; j++) {
-            yCbCr[i][j][0] = 0.299 * img[i * width * 3 + j * 3] + 0.587 * img[i * width * 3 + j * 3 + 1] + 0.114 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][1] = 128 - 0.168736 * img[i * width * 3 + j * 3] - 0.331264 * img[i * width * 3 + j * 3 + 1] + 0.5 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][2] = 128 + 0.5 * img[i * width * 3 + j * 3] - 0.418688 * img[i * width * 3 + j * 3 + 1] - 0.081312 * img[i * width * 3 + j * 3 + 2];
+    pthread_t threads[num_thread];
+    yCbCr_arg color_args[num_thread];
+    
+    int thread_height = height / num_thread;
+    int extra_height = height % num_thread;
+    int start = 0, end;
+    for (int i = 0; i < num_thread; i++){
+        end = (i < extra_height) ? start + thread_height + 1 : start + thread_height;
+        color_args[i].start_row = start;
+        color_args[i].end_row = end;
+        color_args[i].width = width;
+        color_args[i].img = img;
+        color_args[i].yCbCr = &yCbCr;
+
+        start = end;
+        if (pthread_create(&threads[i], NULL, convert_to_yCbCr, (void *)&color_args[i])) {
+            cerr << "Error creating thread" << i+1 << endl;
+            return 1;
         }
     }
+
+    for (int i = 0; i < num_thread; i++){
+        void* retval;
+        if (pthread_join(threads[i], &retval)){
+            cerr << "Error joining thread" << endl;
+            return 2;
+        }
+    }
+
     int transport_size = 0;
     vector<vector<double>> y_de = JPEGCompressAndDepression(yCbCr, 0, transport_size);
     vector<vector<double>> Cb_de = JPEGCompressAndDepression(yCbCr, 1, transport_size);
     vector<vector<double>> Cr_de = JPEGCompressAndDepression(yCbCr, 2, transport_size);
     // Convert back to RGB
     vector<vector<vector<double>>> rgb_de(height, vector<vector<double>>(width, vector<double>(3, 0)));
-    for (int i = 0; i < height; i++) {
-        for (int j = 0; j < width; j++) {
-            rgb_de[i][j][0] = y_de[i][j] + 1.402 * (Cr_de[i][j] - 128);
-            rgb_de[i][j][1] = y_de[i][j] - 0.344136 * (Cb_de[i][j] - 128) - 0.714136 * (Cr_de[i][j] - 128);
-            rgb_de[i][j][2] = y_de[i][j] + 1.772 * (Cb_de[i][j] - 128);
-            for (int k = 0; k < 3; k++) {
-                rgb_de[i][j][k] = (rgb_de[i][j][k] > 255) ? 255 : (rgb_de[i][j][k] < 0) ? 0 : rgb_de[i][j][k];
-            }
+
+    rgb_arg rgb_args[num_thread];
+    start = 0;
+    for (int i = 0; i < num_thread; i++){
+        end = (i < extra_height) ? start + thread_height + 1 : start + thread_height;
+        rgb_args[i].start_row = start;
+        rgb_args[i].end_row = end;
+        rgb_args[i].width = width;
+        rgb_args[i].RGB_de = &rgb_de;
+        rgb_args[i].y_de = &y_de;
+        rgb_args[i].cb_de = &Cb_de;
+        rgb_args[i].cr_de = &Cr_de;
+
+        start = end;
+        if (pthread_create(&threads[i], NULL, convert_to_rgb, (void *)&rgb_args[i])) {
+            cerr << "Error creating thread" << i+1 << endl;
+            return 1;
         }
+    }
+
+    for (int i = 0; i < num_thread; i++){
+        pthread_join(threads[i], NULL);
     }
 
     //show image
@@ -391,8 +496,8 @@ int main() {
             img_de[i * width * 3 + j * 3 + 2] = rgb_de[i][j][2];
         }
     }
-    double end = CycleTimer::currentSeconds();
-    cout << "Time: " << (end - start) * 1000 << "ms" << endl;
+    double end_time = CycleTimer::currentSeconds();
+    cout << "Time: " << (end_time - start_time) * 1000 << "ms" << endl;
     //PSNR 3 channel
     double mse = 0;
     for (int i = 0; i < height; i++) {

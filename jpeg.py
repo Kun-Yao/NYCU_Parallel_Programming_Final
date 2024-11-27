@@ -39,7 +39,7 @@ def IDCT(freq):
     [v, u] = np.meshgrid(x, y)
     
     Sum = np.cos((2 * y.T + 1) * v * np.pi / (2 * N)) @ freq @ np.cos((2 * x.T + 1) * u * np.pi / (2 * N))
-    idct_result = (2 / np.sqrt(N *N))  * Sum
+    idct_result = ( 2 / np.sqrt(N*N))  * Sum
     return idct_result
 
 def quantization(dct):
@@ -225,9 +225,9 @@ chrominance_quantization_table = np.array([
     [51, 60, 70, 70, 78, 95, 91, 94]
 ])
 
-lena = cv2.imread("lena.png")
+lena = cv2.imread("lena1.bmp")
 lena_ycbcr = cv2.cvtColor(lena, cv2.COLOR_BGR2YCrCb)
-cv2.imwrite("lena_ycbcr.png", lena_ycbcr)
+# cv2.imwrite("lena_ycbcr.png", lena_ycbcr)
 Y, Cr, Cb = cv2.split(lena_ycbcr)
 decompressed_color_image = np.zeros(lena_ycbcr.shape).astype(np.int32)
 
@@ -239,17 +239,26 @@ for channel in range(lena.shape[2]):
 # plt.imshow(decompressed_color_image)
 # plt.show()
 
-cv2.imwrite("lenajpg.jpg", lena)
+# cv2.imwrite("lenajpg.jpg", lena)
 decompressed_color_image = decompressed_color_image.astype(np.uint8)
 result = cv2.cvtColor(decompressed_color_image, cv2.COLOR_YCrCb2RGB)
-cv2.imwrite("lena_rgb.jpg", decompressed_color_image)
+# cv2.imwrite("lena_rgb.jpg", decompressed_color_image)
+plt.imshow(lena)
+plt.show()
+plt.imshow(lena_ycbcr)
+plt.show()
+plt.imshow(decompressed_color_image)
+plt.show()
+plt.imshow(result)
+plt.show()
 
-psnr = PSNR(lena_ycbcr, decompressed_color_image)
+psnr = PSNR(lena, decompressed_color_image)
+
 import sys
-dd = cv2.imread("lena_rgb.jpg")
-compression_ratio = sys.getsizeof(dd) / sys.getsizeof(lena_ycbcr)
+# dd = cv2.imread("lena_rgb.jpg")
+# compression_ratio = sys.getsizeof(dd) / sys.getsizeof(lena_ycbcr)
 # from skimage.measure import compare_ssim as ssim
 # ssim_val = ssim(lena.astype(float), result.astype(float))
 print("psnr = ", psnr)
-print("CR = ", compression_ratio)
+# print("CR = ", compression_ratio)
 # print("SSIM = ", ssim)
