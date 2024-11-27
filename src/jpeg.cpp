@@ -477,7 +477,7 @@ int main() {
     // 載入影像
 
     int width, height, channels;
-    unsigned char *img = stbi_load("src/lenna.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load("src/sample_1920.bmp", &width, &height, &channels, 3);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
