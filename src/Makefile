@@ -8,7 +8,7 @@ CXXFLAGS := -O3 -std=c++17 -Wall -pthread
 INCLUDE_DIR := include
 
 # 設定源碼檔案和目標檔案
-SRCS := src/jpeg.cpp
+SRCS := jpeg_pthread.cpp
 OBJS := $(SRCS:.cpp=.o)
 TARGET := my_program
 
