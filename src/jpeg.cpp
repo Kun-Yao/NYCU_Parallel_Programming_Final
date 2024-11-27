@@ -11,6 +11,7 @@
 #include "./include/stb_image_write.h"
 #include <omp.h>
 #include "./include/shishua-avx2.h"
+#include "./include/immintrin.h"
 
 using namespace std;
 
@@ -96,65 +97,93 @@ vector<vector<double>> DCT(vector<vector<double>> &block) {
     return dct;
 }
 //quantization
-// vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
-//     vector<vector<int>> quantization(N, vector<int>(N, 0));
-//     vector<vector<int>> quantization_table;
-//     if (channel == 0) {
-//         quantization_table = luminance_quantization_table;
-//     } else {
-//         quantization_table = chrominance_quantization_table;
-//     }
-//     // #pragma omp parallel for
-//     for (int i = 0; i < N; i++) {
-//         for (int j = 0; j < N; j++) {
-//             quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
-//         }
-//     }
-//     return quantization;
-// }
-std::vector<std::vector<int>> Quantization(std::vector<std::vector<double>> &dct, int channel) {
-    // using double instead of int
-    std::vector<std::vector<double>> quantization(N, std::vector<double>(N, 0));
-    std::vector<std::vector<double>> quantization_table;
-
+vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
+    vector<vector<int>> quantization(N, vector<int>(N, 0));
+    vector<vector<int>> quantization_table;
     if (channel == 0) {
-        quantization_table = luminance_quantization_table_test;
+        quantization_table = luminance_quantization_table;
     } else {
-        quantization_table = chrominance_quantization_table_test;
+        quantization_table = chrominance_quantization_table;
     }
-
-    for (int i = 0; i < N; i++) {
-        for (int j = 0; j < N; j += 4) {
-            __m256d dct_vals = _mm256_loadu_pd(&dct[i][j]);
-            __m256d quant_vals = _mm256_loadu_pd(&quantization_table[i][j]);
-
-            __m256d result = _mm256_div_pd(dct_vals, quant_vals);
-
-            result = _mm256_round_pd(result, _MM_FROUND_TO_NEAREST_INT);
-            _mm256_storeu_pd(&quantization[i][j], result);
-        }
-    }
-
-    // convert to int type
-    std::vector<std::vector<int>> final_quantization(N, std::vector<int>(N, 0));
+    // #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
-            final_quantization[i][j] = static_cast<int>(round(quantization[i][j]));
+            quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
         }
     }
+    return quantization;
+}
+// vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
+//     // using double instead of int
+//     vector<vector<double>> quantization(N, vector<double>(N, 0));
+//     vector<vector<double>> quantization_table;
 
-    return final_quantization;
+//     if (channel == 0) {
+//         quantization_table = luminance_quantization_table_test;
+//     } else {
+//         quantization_table = chrominance_quantization_table_test;
+//     }
+
+//     for (int i = 0; i < N; i++) {
+//         for (int j = 0; j < N; j += 4) {
+//             __m256d dct_vals = _mm256_loadu_pd(&dct[i][j]);
+//             __m256d quant_vals = _mm256_loadu_pd(&quantization_table[i][j]);
+
+//             __m256d result = _mm256_div_pd(dct_vals, quant_vals);
+
+//             result = _mm256_round_pd(result, _MM_FROUND_TO_NEAREST_INT);
+//             _mm256_storeu_pd(&quantization[i][j], result);
+//         }
+//     }
+
+//     // convert to int type
+//     vector<vector<int>> final_quantization(N, vector<int>(N, 0));
+//     for (int i = 0; i < N; i++) {
+//         for (int j = 0; j < N; j++) {
+//             final_quantization[i][j] = static_cast<int>(round(quantization[i][j]));
+//         }
+//     }
+
+//     return final_quantization;
+// }
+vector<int> ZigZag(vector<vector<int>> &quantization) {
+    vector<int> zigzag(N * N, 0);
+
+    // processing 8 values per time
+    for (int i = 0; i < N * N; i += 8) {
+        int idx[8];
+        for (int k = 0; k < 8; ++k) {
+            idx[k] = table[i + k].first * N + table[i + k].second;
+        }
+
+        // load 8 values
+        __m256i values = _mm256_set_epi32(
+            quantization[idx[7] / N][idx[7] % N],
+            quantization[idx[6] / N][idx[6] % N],
+            quantization[idx[5] / N][idx[5] % N],
+            quantization[idx[4] / N][idx[4] % N],
+            quantization[idx[3] / N][idx[3] % N],
+            quantization[idx[2] / N][idx[2] % N],
+            quantization[idx[1] / N][idx[1] % N],
+            quantization[idx[0] / N][idx[0] % N]
+        );
+
+        // store values to zigzag
+        _mm256_storeu_si256((__m256i*)&zigzag[i], values);
+    }
+
+    return zigzag;
 }
 
 //zigzag
-vector<int> ZigZag(vector<vector<int>> &quantization) {
-    vector<int> zigzag(N * N, 0);
-    // #pragma omp parallel for
-    for (int i = 0; i < N * N; i++) {
-        zigzag[i] = quantization[table[i].first][table[i].second];
-    }
-    return zigzag;
-}
+// vector<int> ZigZag(vector<vector<int>> &quantization) {
+//     vector<int> zigzag(N * N, 0);
+//     // #pragma omp parallel for
+//     for (int i = 0; i < N * N; i++) {
+//         zigzag[i] = quantization[table[i].first][table[i].second];
+//     }
+//     return zigzag;
+// }
 //run-length encoding
 vector<pair<int, int>> RunLengthEncoding(vector<int> &zigzag) {
     vector<pair<int, int>> rle;
@@ -299,6 +328,20 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
             dct[i][j] = quantization[i][j] * quantization_table[i][j];
         }
     }
+    // 使用 SIMD 每次處理 8 個整數
+    // for (int i = 0; i < N; i++) {
+    //     for (int j = 0; j < N; j += 8) {
+    //         // 加載量化數據和量化表數據
+    //         __m256i quant_vals = _mm256_loadu_si256((__m256i*)&quantization[i][j]);
+    //         __m256i table_vals = _mm256_loadu_si256((__m256i*)&quantization_table[i][j]);
+
+    //         // 進行逐元素整數乘法
+    //         __m256i result = _mm256_mullo_epi32(quant_vals, table_vals);
+
+    //         // 將結果存回 DCT 矩陣
+    //         _mm256_storeu_si256((__m256i*)&dct[i][j], result);
+    //     }
+    // }
     return dct;
 }
 //inverse DCT
@@ -384,7 +427,7 @@ int main() {
     {
         if (omp_get_thread_num() == 0) { // 主執行緒執行一次
             int num_threads = omp_get_num_threads();
-            std::cout << "Number of threads: " << num_threads << std::endl;
+            cout << "Number of threads: " << num_threads << endl;
         }
     }
     // 載入影像
