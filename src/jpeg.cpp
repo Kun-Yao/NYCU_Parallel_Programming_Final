@@ -4,6 +4,8 @@
 #include <fstream>
 #include <string>
 #include <algorithm>
+#include <tuple>
+#include <unordered_map>
 #include "./include/CycleTimer.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "./include/stb_image.h"
@@ -45,13 +47,13 @@ vector<pair<int,int>>table = {
         {3,5},{2,6},{1,7},{2,7},{3,6},{4,5},{5,4},{6,3},
         {7,2},{7,3},{6,4},{5,5},{4,6},{3,7},{4,7},{5,6},
         {6,5},{7,4},{7,5},{6,6},{5,7},{6,7},{7,6},{7,7} };
-//huffman tree node
 struct Node {
     int value;
     int weight;
+    int marker;
     Node *left;
     Node *right;
-    Node(int value, int weight) : value(value), weight(weight), left(nullptr), right(nullptr) {}
+    Node(int value, int weight, int marker) : value(value), weight(weight), marker(marker), left(nullptr), right(nullptr) {}
     Node(int value, int weight, Node *left, Node *right) : value(value), weight(weight), left(left), right(right) {}
 };
 //DCT
@@ -72,6 +74,7 @@ vector<vector<double>> DCT(vector<vector<double>> &block) {
     }
     return dct;
 }
+
 //quantization
 vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
@@ -88,42 +91,45 @@ vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
     }
     return quantization;
 }
+
 //zigzag
 vector<int> ZigZag(vector<vector<int>> &quantization) {
     vector<int> zigzag(N * N, 0);
+    
     for (int i = 0; i < N * N; i++) {
         zigzag[i] = quantization[table[i].first][table[i].second];
     }
     return zigzag;
 }
 //run-length encoding
-vector<pair<int, int>> RunLengthEncoding(vector<int> &zigzag) {
-    vector<pair<int, int>> rle;
+vector<tuple<int, int, int>> RunLengthEncoding(const vector<int> &zigzag) {
+    vector<tuple<int, int, int>> rle;
     int count = 1;
-    for (int i = 1; i < int(zigzag.size()); i++) {
+    int marker = 0;
+
+    for (int i = 1; i < N * N; i++) {
         if (zigzag[i] == zigzag[i - 1]) {
             count++;
         } else {
-            rle.push_back({count, zigzag[i - 1]});
+            rle.push_back({count, zigzag[i - 1], marker++});
             count = 1;
         }
     }
-    rle.push_back({count, zigzag[zigzag.size() - 1]});
+    rle.push_back({count, zigzag[N * N - 1], marker});
     return rle;
 }
 //build huffman tree
-Node *BuildHuffmanTree(vector<pair<int, int>> &rle) {
+Node *BuildHuffmanTree(vector<tuple<int, int, int>> &rle) {
     vector<Node *> nodes;
     for (const auto &p : rle) {
-        nodes.push_back(new Node(p.second, p.first));   
-    };
+        nodes.push_back(new Node(get<1>(p), get<0>(p), get<2>(p)));   
+    }
     while (nodes.size() > 1) {
-        sort(nodes.begin(), nodes.end(), [](Node *a, Node *b) { return a->weight > b->weight; });
-        Node *left = nodes.back();
-        nodes.pop_back();
-        Node *right = nodes.back();
-        nodes.pop_back();
-        Node *parent = new Node(-1, left->weight + right->weight);
+        sort(nodes.begin(), nodes.end(), [](Node *a, Node *b) { return a->weight < b->weight; });
+        Node *left = nodes[0];
+        Node *right = nodes[1];
+        nodes.erase(nodes.begin(), nodes.begin() + 2);
+        Node *parent = new Node(INT_MAX, left->weight + right->weight, 0);
         parent->left = left;
         parent->right = right;
         nodes.push_back(parent);
@@ -131,81 +137,102 @@ Node *BuildHuffmanTree(vector<pair<int, int>> &rle) {
     return nodes[0];
 }
 //build huffman table
-void BuildHuffmanTable(Node *root, vector<pair<int, string>> &table, string code) {
+void BuildHuffmanTable(Node *root, vector<tuple<int, int, string>> &table, string code = "") {
     if (!root) {
         return;
     }
-    if (root->value != -1) {
-        table.push_back({root->value, code});
+    
+    if (!root->left && !root->right && root->value != INT_MAX) {
+        table.push_back({root->value, root->marker, code});
+        return;
     }
+    
     BuildHuffmanTable(root->left, table, code + "0");
     BuildHuffmanTable(root->right, table, code + "1");
 }
+
 //huffman encoding
-vector<bool> HuffmanEncoding(vector<pair<int, int>> &rle, vector<pair<int, string>> &huffman_table) {
+vector<bool> HuffmanEncoding(vector<tuple<int, int, int>> &rle, vector<tuple<int, int, string>> &huffman_table) {
+    unordered_map<string, string> huffman_map;
+    for (const auto &entry : huffman_table) {
+        string key = to_string(get<0>(entry)) + "|" + to_string(get<1>(entry));
+        huffman_map[key] = get<2>(entry);
+    }
+    
     vector<bool> huffman_code;
     for (const auto &p : rle) {
-        for (const auto &q : huffman_table) {
-            if (p.second == q.first) {
-                for (char c : q.second) {
-                    huffman_code.push_back(c - '0');
-                }
+        string key = to_string(get<1>(p)) + "|" + to_string(get<2>(p));
+        auto it = huffman_map.find(key);
+        if (it != huffman_map.end()) {
+            for (char c : it->second) {
+                huffman_code.push_back(c == '1');
             }
         }
     }
     return huffman_code;
 }
+
 //compress huffman tree
-void CompressHuffmanTree(Node *root, vector<bool> &compressed_structure, vector<int> &compressed_values) {
+void CompressHuffmanTree(Node *root, vector<bool> &compressed_structure, 
+                         vector<int> &compressed_values, vector<int> &compressed_frequencies, vector<int> &compressed_marker) {
     if (!root) {
         return;
     }
-    if (!root->left && !root->right) { // Leaf node
+    if (!root->left && !root->right) {
         compressed_structure.push_back(1);
         compressed_values.push_back(root->value);
+        compressed_frequencies.push_back(root->weight);
+        compressed_marker.push_back(root->marker);
     } else {
         compressed_structure.push_back(0);
     }
-    CompressHuffmanTree(root->left, compressed_structure, compressed_values);
-    CompressHuffmanTree(root->right, compressed_structure, compressed_values);
+    CompressHuffmanTree(root->left, compressed_structure, compressed_values, compressed_frequencies, compressed_marker);
+    CompressHuffmanTree(root->right, compressed_structure, compressed_values, compressed_frequencies, compressed_marker);
 }
-
 // Decompress Huffman tree
-Node* DecompressHuffmanTree(const vector<bool> &compressed_structure, const vector<int> &compressed_values, int &idx_struct, int &idx_value) {
+Node* DecompressHuffmanTree(const vector<bool> &compressed_structure, 
+                            const vector<int> &compressed_values, 
+                            const vector<int> &compressed_frequencies, 
+                            const vector<int> &compressed_marker,
+                            int &idx_struct, int &idx_value) {
     if (static_cast<size_t>(idx_struct) >= compressed_structure.size()) {
         return nullptr;
     }
 
     bool is_leaf = compressed_structure[idx_struct++];
     if (is_leaf) {
-        int value = compressed_values[idx_value++];
-        Node* node = new Node(value, 0);
+        int value = compressed_values[idx_value];
+        int frequency = compressed_frequencies[idx_value];
+        int marker = compressed_marker[idx_value];
+        idx_value++;
+        Node* node = new Node(value, frequency, marker);
         return node;
     } else {
-        Node* node = new Node(-1, 0); // Internal node
-        node->left = DecompressHuffmanTree(compressed_structure, compressed_values, idx_struct, idx_value);
-        node->right = DecompressHuffmanTree(compressed_structure, compressed_values, idx_struct, idx_value);
+        Node* node = new Node(INT_MAX, 0, 0); // Internal node
+        node->left = DecompressHuffmanTree(compressed_structure, compressed_values, compressed_frequencies, compressed_marker, idx_struct, idx_value);
+        node->right = DecompressHuffmanTree(compressed_structure, compressed_values, compressed_frequencies, compressed_marker, idx_struct, idx_value);
         return node;
     }
 }
 
+
 //huffman decoding
 vector<pair<int, int>> HuffmanDecoding(vector<bool> &huffman_code, Node *root) {
-    vector<pair<int, int>> rle;
+    vector<pair<int, int>> decoded_rle;
     Node *node = root;
-    for (int i = 0; i < int(huffman_code.size()); i++) {
-        if (huffman_code[i]) {
-            node = node->right;
-        } else {
-            node = node->left;
-        }
-        if (node->value != -1) {
-            rle.push_back({node->weight, node->value});
+    
+    for (bool bit : huffman_code) {
+        node = bit ? node->right : node->left;
+        
+        if (!node->left && !node->right) {
+            decoded_rle.push_back({node->weight, node->value});
             node = root;
         }
     }
-    return rle;
+    
+    return decoded_rle;
 }
+
 //decode run-length encoding
 vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
     vector<int> zigzag;
@@ -219,9 +246,11 @@ vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
 //inverse zigzag
 vector<vector<int>> InverseZigZag(vector<int> &zigzag) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
+    
     for (int i = 0; i < N * N; i++) {
         quantization[table[i].first][table[i].second] = zigzag[i];
     }
+
     return quantization;
 }
 //inverse quantization
@@ -233,6 +262,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
     } else {
         quantization_table = chrominance_quantization_table;
     }
+    
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             dct[i][j] = quantization[i][j] * quantization_table[i][j];
@@ -243,6 +273,7 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
 //inverse DCT
 vector<vector<double>> InverseDCT(vector<vector<double>> &dct) {
     vector<vector<double>> block(N, vector<double>(N, 0));
+    
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             double sum = 0;
@@ -284,23 +315,23 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
             vector<vector<double>> dct = DCT(block);
             vector<vector<int>> quantization = Quantization(dct, channel);
             vector<int> zigzag = ZigZag(quantization);
-            vector<pair<int, int>> rle = RunLengthEncoding(zigzag);
-            vector<bool> compressed_structure;
-            vector<int> compressed_values;  
-            Node* root = BuildHuffmanTree(rle);
-            CompressHuffmanTree(root, compressed_structure, compressed_values);
-            vector<pair<int, string>> huffman_table;
-            BuildHuffmanTable(root, huffman_table, "");
-            vector<bool> huffman_code = HuffmanEncoding(rle, huffman_table);
-            transport_size += compressed_structure.size() + compressed_values.size() * 8 + huffman_code.size();
+            vector<tuple<int, int, int>> rle = RunLengthEncoding(zigzag);
+            // Huffman Tree 和 Table
+            Node* huffmanTree = BuildHuffmanTree(rle);
+            vector<tuple<int, int, string>> huffmanTable;
+            BuildHuffmanTable(huffmanTree, huffmanTable, "");
+            vector<bool> huffman_code = HuffmanEncoding(rle, huffmanTable);
+            vector<bool> compressedStructure;
+            vector<int> compressedValues;
+            vector<int> compressed_frequencies;
+            vector<int> compressed_marker;
+            CompressHuffmanTree(huffmanTree, compressedStructure, compressedValues, compressed_frequencies, compressed_marker);
+            DeleteHuffmanTree(huffmanTree);
+            transport_size += compressedStructure.size() + compressedValues.size() * 8 + huffman_code.size() + compressed_frequencies.size() * 8 + compressed_marker.size() * 8;
             int index = 0, valueIndex = 0;
-            Node* decompressRoot = DecompressHuffmanTree(compressed_structure, compressed_values, index, valueIndex);
-            //watch decompress tree
-            vector<pair<int, string>> decompressHuffmanTable;
-            BuildHuffmanTable(decompressRoot, decompressHuffmanTable, "");
+            Node* decompressRoot = DecompressHuffmanTree(compressedStructure, compressedValues, compressed_frequencies, compressed_marker, index, valueIndex);
             vector<pair<int, int>> rle_de = HuffmanDecoding(huffman_code, decompressRoot);
-            DeleteHuffmanTree(root);
-            vector<int> zigzag_de = DecodeRunLengthEncoding(rle);
+            vector<int> zigzag_de = DecodeRunLengthEncoding(rle_de);
             vector<vector<int>> quantization_de = InverseZigZag(zigzag_de);
             vector<vector<double>> dct_de = InverseQuantization(quantization_de, channel);
             vector<vector<double>> block_de = InverseDCT(dct_de);
@@ -315,10 +346,10 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
 }
 
 int main() {
-    // 載入影像
 
+    // load image
     int width, height, channels;
-    unsigned char *img = stbi_load("src/lenna.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load("src/sample_1920.bmp", &width, &height, &channels, 3);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
@@ -329,13 +360,33 @@ int main() {
     // rgb to yCbCr
     double start = CycleTimer::currentSeconds();
     vector<vector<vector<double>>> yCbCr(height, vector<vector<double>>(width, vector<double>(3, 0)));
+    
+    // for (int i = 0; i < height; i++) {
+    //     for (int j = 0; j < width; j++) {
+    //         yCbCr[i][j][0] = 0.299 * img[i * width * 3 + j * 3] + 0.587 * img[i * width * 3 + j * 3 + 1] + 0.114 * img[i * width * 3 + j * 3 + 2];
+    //         yCbCr[i][j][1] = 128 - 0.168736 * img[i * width * 3 + j * 3] - 0.331264 * img[i * width * 3 + j * 3 + 1] + 0.5 * img[i * width * 3 + j * 3 + 2];
+    //         yCbCr[i][j][2] = 128 + 0.5 * img[i * width * 3 + j * 3] - 0.418688 * img[i * width * 3 + j * 3 + 1] - 0.081312 * img[i * width * 3 + j * 3 + 2];
+    //     }
+    // }
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
-            yCbCr[i][j][0] = 0.299 * img[i * width * 3 + j * 3] + 0.587 * img[i * width * 3 + j * 3 + 1] + 0.114 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][1] = 128 - 0.168736 * img[i * width * 3 + j * 3] - 0.331264 * img[i * width * 3 + j * 3 + 1] + 0.5 * img[i * width * 3 + j * 3 + 2];
-            yCbCr[i][j][2] = 128 + 0.5 * img[i * width * 3 + j * 3] - 0.418688 * img[i * width * 3 + j * 3 + 1] - 0.081312 * img[i * width * 3 + j * 3 + 2];
+            int index = i * width * 3 + j * 3;
+            float r = img[index];
+            float g = img[index + 1];
+            float b = img[index + 2];
+
+            // YCbCr color space convertion
+            yCbCr[i][j][0] = 0.299f * r + 0.587f * g + 0.114f * b;                         // Y
+            yCbCr[i][j][1] = 128.0f - 0.168736f * r - 0.331264f * g + 0.5f * b;            // Cb
+            yCbCr[i][j][2] = 128.0f + 0.5f * r - 0.418688f * g - 0.081312f * b;            // Cr
+
+            // range limited 0 - 255
+            yCbCr[i][j][0] = fmin(fmax(yCbCr[i][j][0], 0.0f), 255.0f);
+            yCbCr[i][j][1] = fmin(fmax(yCbCr[i][j][1], 0.0f), 255.0f);
+            yCbCr[i][j][2] = fmin(fmax(yCbCr[i][j][2], 0.0f), 255.0f);
         }
     }
+
     int transport_size = 0;
     vector<vector<double>> y_de = JPEGCompressAndDepression(yCbCr, 0, transport_size);
     vector<vector<double>> Cb_de = JPEGCompressAndDepression(yCbCr, 1, transport_size);
