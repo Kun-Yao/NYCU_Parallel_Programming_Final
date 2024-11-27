@@ -27,16 +27,16 @@ vector<vector<int>> luminance_quantization_table = {
     {49, 64, 78, 87, 103, 121, 120, 101},
     {72, 92, 95, 98, 112, 100, 103, 99}
 };
-vector<vector<double>> luminance_quantization_table_test = {
-    {16, 11, 10, 16, 24, 40, 51, 61},
-    {12, 12, 14, 19, 26, 58, 60, 55},
-    {14, 13, 16, 24, 40, 57, 69, 56},
-    {14, 17, 22, 29, 51, 87, 80, 62},
-    {18, 22, 37, 56, 68, 109, 103, 77},
-    {24, 35, 55, 64, 81, 104, 113, 92},
-    {49, 64, 78, 87, 103, 121, 120, 101},
-    {72, 92, 95, 98, 112, 100, 103, 99}
-};
+// vector<vector<double>> luminance_quantization_table_test = {
+//     {16, 11, 10, 16, 24, 40, 51, 61},
+//     {12, 12, 14, 19, 26, 58, 60, 55},
+//     {14, 13, 16, 24, 40, 57, 69, 56},
+//     {14, 17, 22, 29, 51, 87, 80, 62},
+//     {18, 22, 37, 56, 68, 109, 103, 77},
+//     {24, 35, 55, 64, 81, 104, 113, 92},
+//     {49, 64, 78, 87, 103, 121, 120, 101},
+//     {72, 92, 95, 98, 112, 100, 103, 99}
+// };
 //chrominance quantization table
 vector<vector<int>> chrominance_quantization_table = {
     {17, 18, 24, 47, 99, 99, 99, 99},
@@ -48,16 +48,16 @@ vector<vector<int>> chrominance_quantization_table = {
     {99, 99, 99, 99, 99, 99, 99, 99},
     {99, 99, 99, 99, 99, 99, 99, 99}
 };
-vector<vector<double>> chrominance_quantization_table_test = {
-    {17, 18, 24, 47, 99, 99, 99, 99},
-    {18, 21, 26, 66, 99, 99, 99, 99},
-    {24, 26, 56, 99, 99, 99, 99, 99},
-    {47, 66, 99, 99, 99, 99, 99, 99},
-    {99, 99, 99, 99, 99, 99, 99, 99},
-    {99, 99, 99, 99, 99, 99, 99, 99},
-    {99, 99, 99, 99, 99, 99, 99, 99},
-    {99, 99, 99, 99, 99, 99, 99, 99}
-};
+// vector<vector<double>> chrominance_quantization_table_test = {
+//     {17, 18, 24, 47, 99, 99, 99, 99},
+//     {18, 21, 26, 66, 99, 99, 99, 99},
+//     {24, 26, 56, 99, 99, 99, 99, 99},
+//     {47, 66, 99, 99, 99, 99, 99, 99},
+//     {99, 99, 99, 99, 99, 99, 99, 99},
+//     {99, 99, 99, 99, 99, 99, 99, 99},
+//     {99, 99, 99, 99, 99, 99, 99, 99},
+//     {99, 99, 99, 99, 99, 99, 99, 99}
+// };
 //zigzag table
 vector<pair<int,int>>table = { 
         {0,0},{0,1},{1,0},{2,0},{1,1},{0,2},{0,3},{1,2},
@@ -96,6 +96,7 @@ vector<vector<double>> DCT(vector<vector<double>> &block) {
     }
     return dct;
 }
+
 //quantization
 vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
@@ -308,7 +309,40 @@ vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
 vector<vector<int>> InverseZigZag(vector<int> &zigzag) {
     vector<vector<int>> quantization(N, vector<int>(N, 0));
     // #pragma omp parallel for
-    for (int i = 0; i < N * N; i++) {
+    // for (int i = 0; i < N * N; i++) {
+    //     quantization[table[i].first][table[i].second] = zigzag[i];
+    // }
+    // processing 8 values per time
+    int total = N * N;
+    int simd_step = 8;
+    int i = 0;
+
+    for (; i <= total - simd_step; i += simd_step) {
+        // load zigzag values
+        __m256i zigzag_vals = _mm256_loadu_si256((__m256i*)&zigzag[i]);
+
+        // load row and column indices
+        __m256i row_indices = _mm256_set_epi32(
+            table[i + 7].first, table[i + 6].first, table[i + 5].first, table[i + 4].first,
+            table[i + 3].first, table[i + 2].first, table[i + 1].first, table[i + 0].first);
+
+        __m256i col_indices = _mm256_set_epi32(
+            table[i + 7].second, table[i + 6].second, table[i + 5].second, table[i + 4].second,
+            table[i + 3].second, table[i + 2].second, table[i + 1].second, table[i + 0].second);
+
+        // store row and column indices
+        alignas(32) int row_vals[8];
+        alignas(32) int col_vals[8];
+        _mm256_store_si256((__m256i*)row_vals, row_indices);
+        _mm256_store_si256((__m256i*)col_vals, col_indices);
+
+        for (int k = 0; k < simd_step; k++) {
+            quantization[row_vals[k]][col_vals[k]] = _mm256_extract_epi32(zigzag_vals, k);
+        }
+    }
+
+    // process the remaining values
+    for (; i < total; i++) {
         quantization[table[i].first][table[i].second] = zigzag[i];
     }
     return quantization;
@@ -328,20 +362,6 @@ vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, in
             dct[i][j] = quantization[i][j] * quantization_table[i][j];
         }
     }
-    // 使用 SIMD 每次處理 8 個整數
-    // for (int i = 0; i < N; i++) {
-    //     for (int j = 0; j < N; j += 8) {
-    //         // 加載量化數據和量化表數據
-    //         __m256i quant_vals = _mm256_loadu_si256((__m256i*)&quantization[i][j]);
-    //         __m256i table_vals = _mm256_loadu_si256((__m256i*)&quantization_table[i][j]);
-
-    //         // 進行逐元素整數乘法
-    //         __m256i result = _mm256_mullo_epi32(quant_vals, table_vals);
-
-    //         // 將結果存回 DCT 矩陣
-    //         _mm256_storeu_si256((__m256i*)&dct[i][j], result);
-    //     }
-    // }
     return dct;
 }
 //inverse DCT
