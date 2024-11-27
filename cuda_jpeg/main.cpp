@@ -17,7 +17,7 @@ extern void JPEGCompress(double *&perChannel, int channel, int width, int height
 int main() {
     std::cout<<"in"<<std::endl;
     int width, height, channels;
-    unsigned char *img = stbi_load("lena.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load("lenna.bmp", &width, &height, &channels, 3);
     if (!img) {
         std::cerr << "Error: could not load image." << std::endl;
         return -1;
@@ -44,7 +44,6 @@ int main() {
             }
         }
     }
-    std::cout<<mse<<std::endl;
     mse /= (height * width * 3);
     double psnr = 10 * log10((255.0 * 255.0) / mse);
     std::cout << "PSNR: " << psnr << std::endl;

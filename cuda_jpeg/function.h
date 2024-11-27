@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <unordered_map>
+#include <tuple>
 
 #define MAX_THREADS_PER_BLOCK 1024
 void convertRGBToYCbCr(const unsigned char *img, double **yCbCr, int width, int height);
