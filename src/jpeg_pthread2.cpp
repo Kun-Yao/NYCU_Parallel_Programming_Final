@@ -4,7 +4,8 @@
 #include <fstream>
 #include <string>
 #include <algorithm>
-#include <pthread.h>
+#include <tuple>
+#include <unordered_map>
 #include "./include/CycleTimer.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "./include/stb_image.h"
@@ -51,82 +52,112 @@ vector<pair<int,int>>table = {
 struct Node {
     int value;
     int weight;
+    int marker;
     Node *left;
     Node *right;
-    Node(int value, int weight) : value(value), weight(weight), left(nullptr), right(nullptr) {}
+    Node(int value, int weight, int marker) : value(value), weight(weight), marker(marker), left(nullptr), right(nullptr) {}
     Node(int value, int weight, Node *left, Node *right) : value(value), weight(weight), left(left), right(right) {}
 };
+
+struct DCT_arg{
+    int start_block_row;
+    int end_block_row;
+    int channel;
+    vector<vector<double>>* block;
+    vector<vector<double>>* res;
+};
+
+struct Quantization_arg{
+    int start_block_row;
+    int end_block_row;
+    int channel;
+    vector<vector<double>>* block;
+    vector<vector<int>>* res;
+};
+
+struct ZigZag_arg{
+    int start_block_row;
+    int end_block_row;
+    int channel;
+    vector<vector<int>>* block;
+    vector<int>* res;
+};
+
 //DCT
 void* DCT(void* arg) {
-    vector2D_arg* data = (vector2D_arg*)arg;
-    vector<vector<double>> dct(data->thread_block_height, vector<double>(N, 0));
+    DCT_arg* data = static_cast<DCT_arg*>(arg);
+
+    // vector<vector<double>>* dct = new vector<vector<double>>(data->thread_block_height, vector<double>(N, 0));
     for (int u = data->start_block_row; u < data->end_block_row; u++) {
         for (int v = 0; v < N; v++) {
             double sum = 0;
             for (int i = 0; i < N; i++) {
                 for (int j = 0; j < N; j++) {
-                    sum += block[i][j] * cos((2 * i + 1) * u * M_PI / 16) * cos((2 * j + 1) * v * M_PI / 16);
+                    sum += (*data->block)[i][j] * cos((2 * i + 1) * u * M_PI / 16) * cos((2 * j + 1) * v * M_PI / 16);
                 }
             }
             double Cu = (u == 0) ? 1 / sqrt(2) : 1;
             double Cv = (v == 0) ? 1 / sqrt(2) : 1;
-            dct[u][v] = 0.25 * Cu * Cv * sum;
+            (*data->res)[u][v] = 0.25 * Cu * Cv * sum;
         }
     }
-    return dct;
+    return nullptr;
 }
 //quantization
-vector<vector<int>> Quantization(vector<vector<double>> &dct, int channel) {
-    vector<vector<int>> quantization(N, vector<int>(N, 0));
+void* Quantization(void* arg) {
+    // vector<vector<int>> quantization(N, vector<int>(N, 0));
+    Quantization_arg* data = static_cast<Quantization_arg*>(arg);
     vector<vector<int>> quantization_table;
-    if (channel == 0) {
+    if (data->channel == 0) {
         quantization_table = luminance_quantization_table;
     } else {
         quantization_table = chrominance_quantization_table;
     }
-    for (int i = 0; i < N; i++) {
+    for (int i = data->start_block_row; i < data->end_block_row; i++) {
         for (int j = 0; j < N; j++) {
-            quantization[i][j] = round(dct[i][j] / quantization_table[i][j]);
+            (*data->res)[i][j] = round((*data->block)[i][j] / quantization_table[i][j]);
         }
     }
-    return quantization;
+    return nullptr;
 }
 //zigzag
-vector<int> ZigZag(vector<vector<int>> &quantization) {
-    vector<int> zigzag(N * N, 0);
-    for (int i = 0; i < N * N; i++) {
-        zigzag[i] = quantization[table[i].first][table[i].second];
+void* ZigZag(void* arg) {
+    // vector<int> zigzag(N * N, 0);
+    ZigZag_arg* data = static_cast<ZigZag_arg*>(arg);
+    for (int i = data->start_block_row; i < data->end_block_row * N; i++) {
+        (*data->res)[i] = (*data->block)[table[i].first][table[i].second];
     }
-    return zigzag;
+    return nullptr;
 }
 //run-length encoding
-vector<pair<int, int>> RunLengthEncoding(vector<int> &zigzag) {
-    vector<pair<int, int>> rle;
+vector<tuple<int, int, int>> RunLengthEncoding(const vector<int> &zigzag) {
+    vector<tuple<int, int, int>> rle;
     int count = 1;
-    for (int i = 1; i < int(zigzag.size()); i++) {
+    int marker = 0;
+
+    for (int i = 1; i < N * N; i++) {
         if (zigzag[i] == zigzag[i - 1]) {
             count++;
         } else {
-            rle.push_back({count, zigzag[i - 1]});
+            rle.push_back({count, zigzag[i - 1], marker++});
             count = 1;
         }
     }
-    rle.push_back({count, zigzag[zigzag.size() - 1]});
+    rle.push_back({count, zigzag[N * N - 1], marker});
     return rle;
 }
 //build huffman tree
-Node *BuildHuffmanTree(vector<pair<int, int>> &rle) {
+Node *BuildHuffmanTree(vector<tuple<int, int, int>> &rle) {
     vector<Node *> nodes;
     for (const auto &p : rle) {
-        nodes.push_back(new Node(p.second, p.first));   
-    };
+        nodes.push_back(new Node(get<1>(p), get<0>(p), get<2>(p)));   
+    }
     while (nodes.size() > 1) {
-        sort(nodes.begin(), nodes.end(), [](Node *a, Node *b) { return a->weight > b->weight; });
-        Node *left = nodes.back();
-        nodes.pop_back();
-        Node *right = nodes.back();
-        nodes.pop_back();
-        Node *parent = new Node(-1, left->weight + right->weight);
+        sort(nodes.begin(), nodes.end(), [](Node *a, Node *b) { return a->weight < b->weight; });
+        Node *left = nodes[0];
+        Node *right = nodes[1];
+        nodes.erase(nodes.begin(), nodes.begin() + 2);
+        Node *parent = new Node(INT_MAX, left->weight + right->weight, 0);
         parent->left = left;
         parent->right = right;
         nodes.push_back(parent);
@@ -134,81 +165,102 @@ Node *BuildHuffmanTree(vector<pair<int, int>> &rle) {
     return nodes[0];
 }
 //build huffman table
-void BuildHuffmanTable(Node *root, vector<pair<int, string>> &table, string code) {
+void BuildHuffmanTable(Node *root, vector<tuple<int, int, string>> &table, string code = "") {
     if (!root) {
         return;
     }
-    if (root->value != -1) {
-        table.push_back({root->value, code});
+    
+    if (!root->left && !root->right && root->value != INT_MAX) {
+        table.push_back({root->value, root->marker, code});
+        return;
     }
+    
     BuildHuffmanTable(root->left, table, code + "0");
     BuildHuffmanTable(root->right, table, code + "1");
 }
+
 //huffman encoding
-vector<bool> HuffmanEncoding(vector<pair<int, int>> &rle, vector<pair<int, string>> &huffman_table) {
+vector<bool> HuffmanEncoding(vector<tuple<int, int, int>> &rle, vector<tuple<int, int, string>> &huffman_table) {
+    unordered_map<string, string> huffman_map;
+    for (const auto &entry : huffman_table) {
+        string key = to_string(get<0>(entry)) + "|" + to_string(get<1>(entry));
+        huffman_map[key] = get<2>(entry);
+    }
+    
     vector<bool> huffman_code;
     for (const auto &p : rle) {
-        for (const auto &q : huffman_table) {
-            if (p.second == q.first) {
-                for (char c : q.second) {
-                    huffman_code.push_back(c - '0');
-                }
+        string key = to_string(get<1>(p)) + "|" + to_string(get<2>(p));
+        auto it = huffman_map.find(key);
+        if (it != huffman_map.end()) {
+            for (char c : it->second) {
+                huffman_code.push_back(c == '1');
             }
         }
     }
     return huffman_code;
 }
+
 //compress huffman tree
-void CompressHuffmanTree(Node *root, vector<bool> &compressed_structure, vector<int> &compressed_values) {
+void CompressHuffmanTree(Node *root, vector<bool> &compressed_structure, 
+                         vector<int> &compressed_values, vector<int> &compressed_frequencies, vector<int> &compressed_marker) {
     if (!root) {
         return;
     }
-    if (!root->left && !root->right) { // Leaf node
+    if (!root->left && !root->right) {
         compressed_structure.push_back(1);
         compressed_values.push_back(root->value);
+        compressed_frequencies.push_back(root->weight);
+        compressed_marker.push_back(root->marker);
     } else {
         compressed_structure.push_back(0);
     }
-    CompressHuffmanTree(root->left, compressed_structure, compressed_values);
-    CompressHuffmanTree(root->right, compressed_structure, compressed_values);
+    CompressHuffmanTree(root->left, compressed_structure, compressed_values, compressed_frequencies, compressed_marker);
+    CompressHuffmanTree(root->right, compressed_structure, compressed_values, compressed_frequencies, compressed_marker);
 }
-
 // Decompress Huffman tree
-Node* DecompressHuffmanTree(const vector<bool> &compressed_structure, const vector<int> &compressed_values, int &idx_struct, int &idx_value) {
-    if (idx_struct >= compressed_structure.size()) {
+Node* DecompressHuffmanTree(const vector<bool> &compressed_structure, 
+                            const vector<int> &compressed_values, 
+                            const vector<int> &compressed_frequencies, 
+                            const vector<int> &compressed_marker,
+                            int &idx_struct, int &idx_value) {
+    if (static_cast<size_t>(idx_struct) >= compressed_structure.size()) {
         return nullptr;
     }
 
     bool is_leaf = compressed_structure[idx_struct++];
     if (is_leaf) {
-        int value = compressed_values[idx_value++];
-        Node* node = new Node(value, 0);
+        int value = compressed_values[idx_value];
+        int frequency = compressed_frequencies[idx_value];
+        int marker = compressed_marker[idx_value];
+        idx_value++;
+        Node* node = new Node(value, frequency, marker);
         return node;
     } else {
-        Node* node = new Node(-1, 0); // Internal node
-        node->left = DecompressHuffmanTree(compressed_structure, compressed_values, idx_struct, idx_value);
-        node->right = DecompressHuffmanTree(compressed_structure, compressed_values, idx_struct, idx_value);
+        Node* node = new Node(INT_MAX, 0, 0); // Internal node
+        node->left = DecompressHuffmanTree(compressed_structure, compressed_values, compressed_frequencies, compressed_marker, idx_struct, idx_value);
+        node->right = DecompressHuffmanTree(compressed_structure, compressed_values, compressed_frequencies, compressed_marker, idx_struct, idx_value);
         return node;
     }
 }
 
+
 //huffman decoding
 vector<pair<int, int>> HuffmanDecoding(vector<bool> &huffman_code, Node *root) {
-    vector<pair<int, int>> rle;
+    vector<pair<int, int>> decoded_rle;
     Node *node = root;
-    for (int i = 0; i < int(huffman_code.size()); i++) {
-        if (huffman_code[i]) {
-            node = node->right;
-        } else {
-            node = node->left;
-        }
-        if (node->value != -1) {
-            rle.push_back({node->weight, node->value});
+    
+    for (bool bit : huffman_code) {
+        node = bit ? node->right : node->left;
+        
+        if (!node->left && !node->right) {
+            decoded_rle.push_back({node->weight, node->value});
             node = root;
         }
     }
-    return rle;
+    
+    return decoded_rle;
 }
+
 //decode run-length encoding
 vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
     vector<int> zigzag;
@@ -220,46 +272,49 @@ vector<int> DecodeRunLengthEncoding(vector<pair<int, int>> &rle) {
     return zigzag;
 }
 //inverse zigzag
-vector<vector<int>> InverseZigZag(vector<int> &zigzag) {
-    vector<vector<int>> quantization(N, vector<int>(N, 0));
-    for (int i = 0; i < N * N; i++) {
-        quantization[table[i].first][table[i].second] = zigzag[i];
+void* InverseZigZag(void* arg) {
+    // vector<vector<int>> quantization(N, vector<int>(N, 0));
+    ZigZag_arg* data = static_cast<ZigZag_arg*>(arg);
+    for (int i = data->start_block_row; i < data->end_block_row * N; i++) {
+        (*data->block)[table[i].first][table[i].second] = (*data->res)[i];
     }
-    return quantization;
+    return nullptr;
 }
 //inverse quantization
-vector<vector<double>> InverseQuantization(vector<vector<int>> &quantization, int channel) {
-    vector<vector<double>> dct(N, vector<double>(N, 0));
+void* InverseQuantization(void* arg) {
+    // vector<vector<double>> dct(N, vector<double>(N, 0));
+    Quantization_arg* data = static_cast<Quantization_arg*>(arg);
     vector<vector<int>> quantization_table;
-    if (channel == 0) {
+    if (data->channel == 0) {
         quantization_table = luminance_quantization_table;
     } else {
         quantization_table = chrominance_quantization_table;
     }
-    for (int i = 0; i < N; i++) {
+    for (int i = data->start_block_row; i < data->end_block_row; i++) {
         for (int j = 0; j < N; j++) {
-            dct[i][j] = quantization[i][j] * quantization_table[i][j];
+            (*data->block)[i][j] = (*data->res)[i][j] * quantization_table[i][j];
         }
     }
-    return dct;
+    return nullptr;
 }
 //inverse DCT
-vector<vector<double>> InverseDCT(vector<vector<double>> &dct) {
-    vector<vector<double>> block(N, vector<double>(N, 0));
-    for (int i = 0; i < N; i++) {
+void* InverseDCT(void* arg) {
+    // vector<vector<double>> block(N, vector<double>(N, 0));
+    DCT_arg* data = static_cast<DCT_arg*>(arg);
+    for (int i = data->start_block_row; i < data->end_block_row; i++) {
         for (int j = 0; j < N; j++) {
             double sum = 0;
             for (int u = 0; u < N; u++) {
                 for (int v = 0; v < N; v++) {
                     double Cu = (u == 0) ? 1 / sqrt(2) : 1;
                     double Cv = (v == 0) ? 1 / sqrt(2) : 1;
-                    sum += Cu * Cv * dct[u][v] * cos((2 * i + 1) * u * M_PI / 16) * cos((2 * j + 1) * v * M_PI / 16);
+                    sum += Cu * Cv * (*data->res)[u][v] * cos((2 * i + 1) * u * M_PI / 16) * cos((2 * j + 1) * v * M_PI / 16);
                 }
             }
-            block[i][j] = 0.25 * sum;
+            (*data->block)[i][j] = 0.25 * sum;
         }
     }
-    return block;
+    return nullptr;
 }
 void DeleteHuffmanTree(Node* root) {
     if (root) {
@@ -279,14 +334,6 @@ struct jpeg_arg{
     vector<vector<double>>* channel_de;
 };
 
-struct vector2D_arg{
-    int start_block_row;
-    int end_block_row;
-    int thread_block_height;
-    int channel;
-    vector<vector<double>>* block;
-};
-
 vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> &yCbCr, int channel, int& transport_size) {
     int height = yCbCr.size();
     int width = yCbCr[0].size();
@@ -294,34 +341,39 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
     vector<vector<double>> channel_de(height, vector<double>(width, 0));
     // 8x8 block DCT
     pthread_t threads[num_thread];
-    jpeg_arg jpeg_args[num_thread];
-
+    DCT_arg dct_args[num_thread];
+    Quantization_arg quan_args[num_thread];
+    ZigZag_arg zigzag_args[num_thread];
     int block_height = height / 8;
     int block_width = width / 8;
-    for (int i = 0; i < block_height; i++) {
+
+    for (int k = 0; k < block_height; k++) {
         for (int j = 0; j < block_width; j++) {
             vector<vector<double>> block(N, vector<double>(N, 0));
             for (int x = 0; x < N; x++) {
                 for (int y = 0; y < N; y++) {
-                    block[x][y] = yCbCr[i * 8 + x][j * 8 + y][channel];
+                    block[x][y] = yCbCr[k * 8 + x][j * 8 + y][channel];
                 }
             }
-            pthread_t threads[num_thread];
-            vector2D_arg v_args[num_thread];
+            
             int thread_block_height = 8 / num_thread;
             int extra_block_height = 8 % num_thread;
             int start = 0, end;
+            // vector<vector<double>> dct = DCT(block);
+            vector<vector<double>> dct(N, vector<double>(N, 0));
             for (int i = 0; i < num_thread; i++){
                 end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
-                v_args[i].start_block_row = start;
-                v_args[i].end_block_row = end;
-                v_args[i].thread_block_height = end - start;
-                v_args[i].channel = channel;
-                v_args[i].block = &block;
-                if (pthread_create(&threads[i], nullptr, DCT, (void*)v_args)){
+                dct_args[i].start_block_row = start;
+                dct_args[i].end_block_row = end;
+                dct_args[i].channel = channel;
+                dct_args[i].block = &block;
+                dct_args[i].res = &dct;
+                
+                if (pthread_create(&threads[i], nullptr, DCT, (void*)&dct_args[i])){
                     cerr << "Error creating thread" << i+1 << endl;
                     return {};
                 }
+                start = end;
             }
             for (int i = 0; i < num_thread; i++){
                 void* retval;
@@ -330,31 +382,150 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
                     return {};
                 }
             }
-            vector<vector<int>> quantization = Quantization(dct, data->channel);
-            vector<int> zigzag = ZigZag(quantization);
-            vector<pair<int, int>> rle = RunLengthEncoding(zigzag);
-            vector<bool> compressed_structure;
-            vector<int> compressed_values;  
-            Node* root = BuildHuffmanTree(rle);
-            CompressHuffmanTree(root, compressed_structure, compressed_values);
-            vector<pair<int, string>> huffman_table;
-            BuildHuffmanTable(root, huffman_table, "");
-            vector<bool> huffman_code = HuffmanEncoding(rle, huffman_table);
-            transport_size += compressed_structure.size() + compressed_values.size() * 8 + huffman_code.size();
+            // vector<vector<int>> quantization = Quantization(dct, channel);
+            start = 0;
+            vector<vector<int>> quantization(N, vector<int>(N, 0));
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                quan_args[i].start_block_row = start;
+                quan_args[i].end_block_row = end;
+                quan_args[i].channel = channel;
+                quan_args[i].block = &dct;
+                quan_args[i].res = &quantization;
+                
+                if (pthread_create(&threads[i], nullptr, Quantization, (void*)&quan_args[i])){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+                start = end;
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
+            
+            // vector<int> zigzag = ZigZag(quantization);
+            start = 0;
+            vector<int> zigzag(N * N, 0);
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                zigzag_args[i].start_block_row = start;
+                zigzag_args[i].end_block_row = end;
+                zigzag_args[i].channel = channel;
+                zigzag_args[i].block = &quantization;
+                zigzag_args[i].res = &zigzag;
+                
+                if (pthread_create(&threads[i], nullptr, ZigZag, (void*)&zigzag_args[i])){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+                start = end;
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
+
+            vector<tuple<int, int, int>> rle = RunLengthEncoding(zigzag);
+            // Huffman Tree 和 Table
+            Node* huffmanTree = BuildHuffmanTree(rle);
+            vector<tuple<int, int, string>> huffmanTable;
+            BuildHuffmanTable(huffmanTree, huffmanTable, "");
+            vector<bool> huffman_code = HuffmanEncoding(rle, huffmanTable);
+            vector<bool> compressedStructure;
+            vector<int> compressedValues;
+            vector<int> compressed_frequencies;
+            vector<int> compressed_marker;
+            CompressHuffmanTree(huffmanTree, compressedStructure, compressedValues, compressed_frequencies, compressed_marker);
+            DeleteHuffmanTree(huffmanTree);
+            transport_size += compressedStructure.size() + compressedValues.size() * 8 + huffman_code.size() + compressed_frequencies.size() * 8 + compressed_marker.size() * 8;
             int index = 0, valueIndex = 0;
-            Node* decompressRoot = DecompressHuffmanTree(compressed_structure, compressed_values, index, valueIndex);
-            //watch decompress tree
-            vector<pair<int, string>> decompressHuffmanTable;
-            BuildHuffmanTable(decompressRoot, decompressHuffmanTable, "");
+            Node* decompressRoot = DecompressHuffmanTree(compressedStructure, compressedValues, compressed_frequencies, compressed_marker, index, valueIndex);
             vector<pair<int, int>> rle_de = HuffmanDecoding(huffman_code, decompressRoot);
-            DeleteHuffmanTree(root);
-            vector<int> zigzag_de = DecodeRunLengthEncoding(rle);
-            vector<vector<int>> quantization_de = InverseZigZag(zigzag_de);
-            vector<vector<double>> dct_de = InverseQuantization(quantization_de, data->channel);
-            vector<vector<double>> block_de = InverseDCT(dct_de);
+            vector<int> zigzag_de = DecodeRunLengthEncoding(rle_de);
+            
+            // vector<vector<int>> quantization_de = InverseZigZag(zigzag_de);
+            start = 0;
+            vector<vector<int>> quantization_de(N, vector<int>(N, 0));
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                zigzag_args[i].start_block_row = start;
+                zigzag_args[i].end_block_row = end;
+                zigzag_args[i].channel = channel;
+                zigzag_args[i].block = &quantization_de;
+                zigzag_args[i].res = &zigzag_de;
+                
+                if (pthread_create(&threads[i], nullptr, InverseZigZag, (void*)&zigzag_args[i])){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+                start = end;
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
+
+            // vector<vector<double>> dct_de = InverseQuantization(quantization_de, channel);
+            start = 0;
+            vector<vector<double>> dct_de(N, vector<double>(N, 0));
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                quan_args[i].start_block_row = start;
+                quan_args[i].end_block_row = end;
+                quan_args[i].channel = channel;
+                quan_args[i].block = &dct_de;
+                quan_args[i].res = &quantization_de;
+                if (pthread_create(&threads[i], nullptr, InverseQuantization, (void*)&quan_args[i])){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+                start = end;
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
+            
+            // vector<vector<double>> block_de = InverseDCT(dct_de);
+            start = 0;
+            vector<vector<double>> block_de(N, vector<double>(N, 0));
+            for (int i = 0; i < num_thread; i++){
+                end = (i < extra_block_height) ? start + thread_block_height + 1 : start + thread_block_height;
+                dct_args[i].start_block_row = start;
+                dct_args[i].end_block_row = end;
+                dct_args[i].channel = channel;
+                dct_args[i].block = &block_de;
+                dct_args[i].res = &dct_de;
+                
+                if (pthread_create(&threads[i], nullptr, InverseDCT, (void*)&dct_args[i])){
+                    cerr << "Error creating thread" << i+1 << endl;
+                    return {};
+                }
+                start = end;
+            }
+            for (int i = 0; i < num_thread; i++){
+                void* retval;
+                if (pthread_join(threads[i], &retval)){
+                    cerr << "Error joining thread" << endl;
+                    return {};
+                }
+            }
             for (int x = 0; x < N; x++) {
                 for (int y = 0; y < N; y++) {
-                    channel_de[i * 8 + x][j * 8 + y] = block_de[x][y];
+                    channel_de[k * 8 + x][j * 8 + y] = block_de[x][y];
                 }
             }
         }
