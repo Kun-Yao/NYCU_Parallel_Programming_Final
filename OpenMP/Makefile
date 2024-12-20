@@ -11,6 +11,7 @@ INCLUDE_DIR := include
 SRCS := src/jpeg.cpp
 OBJS := $(SRCS:.cpp=.o)
 TARGET := JPEGCompress_main
+IMG := output.png
 
 # 預設目標
 all: $(TARGET)
@@ -25,7 +26,7 @@ $(TARGET): $(OBJS)
 
 # 清理編譯產物
 clean:
-	$(RM) $(OBJS) $(TARGET) *~
+	$(RM) $(OBJS) $(TARGET) $(IMG)
 
 # 幫助目標
 help:
