@@ -465,7 +465,24 @@ vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> 
     return yCbCr_de;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+
+    string inputFilename;
+    string outputFilename = "output.png";
+
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (string(argv[i]) == "-f" && i + 1 < argc) {
+            inputFilename = argv[++i];
+        } else if (string(argv[i]) == "-o" && i + 1 < argc) {
+            outputFilename = argv[++i];
+        }
+    }
+    if (inputFilename.empty()) {
+        cerr << "Error: Input file not specified. Use -f <filename> to specify the input file.\n";
+        return -1;
+    }
+
 
     #pragma omp parallel
     {
@@ -477,7 +494,7 @@ int main() {
     // 載入影像
 
     int width, height, channels;
-    unsigned char *img = stbi_load("src/sample_1920.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load(inputFilename.c_str(), &width, &height, &channels, 3);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
@@ -562,7 +579,7 @@ int main() {
     //compression ratio
     double compression_ratio = (transport_size + 8*8*4*2) / double(width * height * 3 * 8);
     cout << "Compression ratio: " << compression_ratio << endl;
-    stbi_write_png("lena_de.png", width, height, 3, img_de.data(), width * 3);
+    stbi_write_png(outputFilename.c_str(), width, height, 3, img_de.data(), width * 3);
     stbi_image_free(img);
     return 0;
 
