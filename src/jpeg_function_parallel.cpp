@@ -109,7 +109,6 @@ vector<tuple<int, int, int>> RunLengthEncoding(const vector<int> &zigzag) {
     vector<tuple<int, int, int>> rle;
     int count = 1;
     int marker = 0;
-    // #pragma omp parallel for
     for (int i = 1; i < N * N; i++) {
         if (zigzag[i] == zigzag[i - 1]) {
             count++;
