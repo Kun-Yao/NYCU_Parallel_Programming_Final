@@ -319,9 +319,8 @@ void DeleteHuffmanTree(Node* root) {
 void JPEGCompress(double *&perChannel, int channel, int width, int height) {
     // Precompute cosine values for the DCT
     precomputeCosineValues();
-
-    int blocksX = (width + N - 1) / N;
-    int blocksY = (height + N - 1) / N;
+    int blocksX = (height + N - 1) / N;
+    int blocksY = (width + N - 1) / N;
     int totalBlocks = blocksX * blocksY;
 
     double *d_input, *d_dctBlocks, *d_idctBlocks, *d_outputImage;
@@ -353,7 +352,6 @@ void JPEGCompress(double *&perChannel, int channel, int width, int height) {
     int* h_zigzagBlocks = new int[totalBlocks * N * N];
     int* h_dezigzagBlocks = new int[totalBlocks * N * N];
     int* blockZigzag = new int[ N * N];
-
     cudaError_t err = cudaMemcpy(h_zigzagBlocks, d_zigzagBlocks, totalBlocks * N * N * sizeof(int), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
         printf("Error: %s\n", cudaGetErrorString(err));

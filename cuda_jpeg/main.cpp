@@ -14,12 +14,27 @@
 extern void convertRGBToYCbCr(const unsigned char *img, double **yCbCr, int width, int height);
 extern void convertYCbCrToRGB(double **yCbCr, unsigned char *img, int width, int height);
 extern void JPEGCompress(double *&perChannel, int channel, int width, int height);
-int main() {
-    std::cout<<"in"<<std::endl;
+int main(int argc, char* argv[]) {
+    std::string inputFilename;
+    std::string outputFilename = "output.png";
+
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "-f" && i + 1 < argc) {
+            inputFilename = argv[++i];
+        } else if (std::string(argv[i]) == "-o" && i + 1 < argc) {
+            outputFilename = argv[++i];
+        }
+    }
+    if (inputFilename.empty()) {
+        std::cerr << "Error: Input file not specified. Use -f <filename> to specify the input file.\n";
+        return -1;
+    }
+
     int width, height, channels;
-    unsigned char *img = stbi_load("lenna.bmp", &width, &height, &channels, 3);
+    unsigned char *img = stbi_load(inputFilename.c_str(), &width, &height, &channels, 3);
     if (!img) {
-        std::cerr << "Error: could not load image." << std::endl;
+        std::cerr << "Error: could not load image.\n";
         return -1;
     }
     double *yCbCr[3];
@@ -28,7 +43,6 @@ int main() {
     }
     double start = CycleTimer::currentSeconds();
     convertRGBToYCbCr(img, yCbCr, width, height);
-    std::cout<<"complete color change"<<std::endl;
     for (int i = 0; i < 3; i++) {
         JPEGCompress(yCbCr[i], i, width, height);
     }
@@ -47,7 +61,7 @@ int main() {
     mse /= (height * width * 3);
     double psnr = 10 * log10((255.0 * 255.0) / mse);
     std::cout << "PSNR: " << psnr << std::endl;
-    stbi_write_png("lena_de.png", width, height, 3, reconstructedImg, width * 3);
+    stbi_write_png(outputFilename.c_str(), width, height, 3, reconstructedImg, width * 3);
     // Free host memory
     stbi_image_free(img);
     free(yCbCr[0]);
