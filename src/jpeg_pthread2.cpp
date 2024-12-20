@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <tuple>
 #include <unordered_map>
+#include <getopt.h>
 #include "./include/CycleTimer.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "./include/stb_image.h"
@@ -15,7 +16,13 @@
 using namespace std;
 
 const int N = 8;
-const int num_thread = 6;
+void usage(const char *progname)
+{
+   printf("Usage: %s [options]\n", progname);
+   printf("Program Options:\n");
+   printf("  -f  --input   <String> Input image\n");
+   printf("  -o  --output  <String> Output image\n");
+}
 //luminance quantization table
 vector<vector<int>> luminance_quantization_table = {
     {16, 11, 10, 16, 24, 40, 51, 61},
@@ -334,7 +341,7 @@ struct jpeg_arg{
     vector<vector<double>>* channel_de;
 };
 
-vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> &yCbCr, int channel, int& transport_size) {
+vector<vector<double>> JPEGCompressAndDepression(vector<vector<vector<double>>> &yCbCr, int channel, int& transport_size, int num_thread) {
     int height = yCbCr.size();
     int width = yCbCr[0].size();
     //Decompression image individual channel
@@ -584,11 +591,38 @@ void* convert_to_rgb(void* arg) {
     return nullptr;
 }
 
-int main() {
-    // 載入影像
-
+int main(int argc, char *argv[]) {
+    const int num_thread = atoi(argv[1]);
     int width, height, channels;
-    unsigned char *img = stbi_load("lenna.bmp", &width, &height, &channels, 3);
+    const char* inputFile = "sample.bmp";
+    const char* outputFile = "lena_de.png";
+    // parse commandline options
+    int opt;
+    static struct option long_options[] = {
+        {"input", 1, 0, 'f'},
+        {"output", 1, 0, 'o'},
+        {0, 0, 0, 0}};
+
+    while ((opt = getopt_long(argc, argv, "f:o:", long_options, NULL)) != EOF)
+    {
+        switch (opt)
+        {
+        case 'f':
+            inputFile = optarg;
+            break;
+        
+        case 'o':
+            outputFile = optarg;
+            break;
+
+        default:
+            fprintf(stderr, "Usage: %s -i <input_file> or --input=<input_file>\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+    // end parsing of commandline options
+    // 載入影像
+    unsigned char *img = stbi_load(inputFile, &width, &height, &channels, 3);
     if (!img) {
         cout << "Failed to load image! Error: " << stbi_failure_reason() << endl;
         return -1;
@@ -629,9 +663,9 @@ int main() {
     }
 
     int transport_size = 0;
-    vector<vector<double>> y_de = JPEGCompressAndDepression(yCbCr, 0, transport_size);
-    vector<vector<double>> Cb_de = JPEGCompressAndDepression(yCbCr, 1, transport_size);
-    vector<vector<double>> Cr_de = JPEGCompressAndDepression(yCbCr, 2, transport_size);
+    vector<vector<double>> y_de = JPEGCompressAndDepression(yCbCr, 0, transport_size, num_thread);
+    vector<vector<double>> Cb_de = JPEGCompressAndDepression(yCbCr, 1, transport_size, num_thread);
+    vector<vector<double>> Cr_de = JPEGCompressAndDepression(yCbCr, 2, transport_size, num_thread);
     // Convert back to RGB
     vector<vector<vector<double>>> rgb_de(height, vector<vector<double>>(width, vector<double>(3, 0)));
 
@@ -684,7 +718,8 @@ int main() {
     //compression ratio
     double compression_ratio = (transport_size + 8*8*4*2) / double(width * height * 3 * 8);
     cout << "Compression ratio: " << compression_ratio << endl;
-    stbi_write_png("lena_de.png", width, height, 3, img_de.data(), width * 3);
+    stbi_write_png(outputFile, width, height, 3, img_de.data(), width * 3);
+    cout << "save as " << outputFile << endl;
     stbi_image_free(img);
     return 0;
 

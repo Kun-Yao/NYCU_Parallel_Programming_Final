@@ -1,3 +1,4 @@
+PTHREAD = pthread
 # 設定 C++ 編譯器
 CXX := g++
 
@@ -8,7 +9,7 @@ CXXFLAGS := -O3 -std=c++17 -Wall -pthread
 INCLUDE_DIR := include
 
 # 設定源碼檔案和目標檔案
-SRCS := jpeg_pthread.cpp
+SRCS := jpeg_${PTHREAD}.cpp
 OBJS := $(SRCS:.cpp=.o)
 TARGET := my_program
 
