@@ -10,7 +10,7 @@ INCLUDE_DIR := include
 # 設定源碼檔案和目標檔案
 SRCS := src/jpeg.cpp
 OBJS := $(SRCS:.cpp=.o)
-TARGET := my_program
+TARGET := JPEGCompress_main
 
 # 預設目標
 all: $(TARGET)
