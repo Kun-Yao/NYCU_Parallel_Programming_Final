@@ -7,10 +7,16 @@ cd 至欲平行化的方法資料夾(CUDA/Pthread/OpenMP)
 
 ### 編譯
 
+* CUDA & OpenMP version
 ```
 make
 ```
 
+* Pthread version
+```
+make PTHREAD=<parallel type>
+```
+parallel type分成pthread和pthread2，分別對應"對整張圖做平行化"和"對各個block做平行化"
 ### 執行
 
 * CUDA version
